@@ -1,0 +1,329 @@
+import express, { type Request, Response, NextFunction } from "express";
+import { registerRoutes } from "./routes";
+import { serveStatic } from "./static";
+import { createServer } from "http";
+import session from "express-session";
+import { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, REST, Routes } from 'discord.js';
+import axios from 'axios';
+
+const app = express();
+const httpServer = createServer(app);
+
+declare module "http" {
+  interface IncomingMessage {
+    rawBody: unknown;
+  }
+}
+
+// Discord Bot Configuration
+const BOT_CONFIG = {
+    BOT_TOKEN: 'MTQ1MTQ4MjY2NjI3MTc3Mjc1NA.G9dg1e.V8I-c-2K652-43uTH3593a1g6byy6vx2a-1FsA',
+    CLIENT_ID: '1451482666271772754',
+    GUILD_ID: '1439165596725022753',
+    CHANNEL_VERIFY_ID: '1439165986564477038',
+    CHANNEL_ADMIN_DASHBOARD_ID: '1451840744703787008',
+    ROLE_VERIFIED_ID: '1451490702348259409',
+};
+
+// Discord Bot Setup
+async function verifyMLBBAccount(gameId: string, serverId: string) {
+    try {
+        const data = await axios.post("https://moogold.com/wp-content/plugins/id-validation-new/id-validation-ajax.php", new URLSearchParams({
+            "attribute_amount": "Weekly Pass",
+            "text-5f6f144f8ffee": gameId,
+            "text-1601115253775": serverId,
+            "quantity": 1,
+            "add-to-cart": 15145,
+            "product_id": 15145,
+            "variation_id": 4690783
+        }), {
+            headers: {
+                "Referer": "https://moogold.com/product/mobile-legends/",
+                "Origin": "https://moogold.com"
+            }
+        });
+
+        const { message } = data.data;
+        if (!message) throw new Error('Invalid ID or Server');
+        
+        const lines = message.split("\n");
+        const result: Record<string, string> = {};
+        lines.forEach(line => {
+            const [key, value] = line.split(":");
+            if (key && value) {
+                result[key.trim().toLowerCase().replace(/ /g, "-")] = value.trim();
+            }
+        });
+        
+        return result;
+    } catch (error) {
+        throw new Error('Verification failed: ' + (error instanceof Error ? error.message : String(error)));
+    }
+}
+
+async function startDiscordBot() {
+    const commands = [{ name: 'verify', description: 'Verify your Mobile Legends account' }];
+    const rest = new REST({ version: '10' }).setToken(BOT_CONFIG.BOT_TOKEN);
+
+    const client = new Client({
+        intents: [
+            GatewayIntentBits.Guilds,
+            GatewayIntentBits.GuildMessages,
+            GatewayIntentBits.DirectMessages,
+            GatewayIntentBits.MessageContent,
+            GatewayIntentBits.GuildMembers
+        ],
+        partials: [Partials.Channel]
+    });
+
+    async function registerCommands() {
+        try {
+            console.log('🤖 [Discord Bot] Registering commands...');
+            await rest.put(
+                Routes.applicationGuildCommands(BOT_CONFIG.CLIENT_ID, BOT_CONFIG.GUILD_ID),
+                { body: commands },
+            );
+            console.log('✅ [Discord Bot] Commands registered');
+        } catch (error) {
+            console.error('❌ [Discord Bot] Error registering commands:', error);
+        }
+    }
+
+    client.once('ready', async () => {
+        console.log(`✅ [Discord Bot] Logged in as ${client.user?.tag}`);
+        await registerCommands();
+    });
+
+    client.on('interactionCreate', async interaction => {
+        try {
+            if (interaction.isChatInputCommand() && interaction.commandName === 'verify') {
+                console.log(`📝 [Discord Bot] /verify command from ${interaction.user.tag}`);
+                
+                const isAllowedChannel = interaction.channelId === BOT_CONFIG.CHANNEL_VERIFY_ID || !interaction.guild;
+                if (!isAllowedChannel) {
+                    return await interaction.reply({
+                        content: `❌ This command can only be used in <#${BOT_CONFIG.CHANNEL_VERIFY_ID}>`,
+                        ephemeral: true
+                    });
+                }
+
+                const modal = new ModalBuilder()
+                    .setCustomId('mlbbVerifyModal')
+                    .setTitle('Mobile Legends Verification');
+
+                const gameIdInput = new TextInputBuilder()
+                    .setCustomId('gameIdInput')
+                    .setLabel('Enter your Game ID (9-10 digits)')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true);
+
+                const serverInput = new TextInputBuilder()
+                    .setCustomId('serverInput')
+                    .setLabel('Enter your Server (SEA, GLOBAL, AMERICAS, EUROPE)')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true);
+
+                modal.addComponents(
+                    new ActionRowBuilder<TextInputBuilder>().addComponents(gameIdInput),
+                    new ActionRowBuilder<TextInputBuilder>().addComponents(serverInput)
+                );
+
+                await interaction.showModal(modal);
+            }
+
+            if (interaction.isModalSubmit() && interaction.customId === 'mlbbVerifyModal') {
+                console.log(`📋 [Discord Bot] Modal submitted by ${interaction.user.tag}`);
+                
+                const gameId = interaction.fields.getTextInputValue('gameIdInput');
+                const serverId = interaction.fields.getTextInputValue('serverInput');
+
+                await interaction.deferReply({ ephemeral: true });
+
+                try {
+                    console.log(`🔍 [Discord Bot] Verifying Game ID: ${gameId}, Server: ${serverId}`);
+                    const playerData = await verifyMLBBAccount(gameId, serverId);
+
+                    const playerName = playerData['player-name'] || 'Unknown';
+                    const playerLevel = playerData['level'] || '?';
+                    const playerRegion = playerData['region'] || serverId;
+
+                    console.log(`✅ [Discord Bot] Account verified: ${playerName}`);
+
+                    try {
+                        await interaction.user.send(
+                            `✅ **Congratulations!**\n\nYour Mobile Legends account **${playerName}** (Level ${playerLevel}, ${playerRegion}) has been verified!\n\nYou now have access to all server channels. Welcome to IPEORG! 🎮`
+                        );
+                    } catch (e) {
+                        console.error('[Discord Bot] Failed to send DM:', e instanceof Error ? e.message : String(e));
+                    }
+
+                    const guild = interaction.guild;
+                    const adminChannel = guild ? guild.channels.cache.get(BOT_CONFIG.CHANNEL_ADMIN_DASHBOARD_ID) : null;
+
+                    if (adminChannel && adminChannel.isTextBased()) {
+                        const embed = new EmbedBuilder()
+                            .setTitle('✅ New Verification')
+                            .setColor('Green')
+                            .addFields(
+                                { name: 'User', value: `<@${interaction.user.id}>`, inline: true },
+                                { name: 'Discord Tag', value: interaction.user.tag, inline: true },
+                                { name: 'Game ID', value: gameId, inline: true },
+                                { name: 'Server', value: serverId, inline: true },
+                                { name: 'Player Name', value: playerName, inline: true },
+                                { name: 'Level', value: playerLevel, inline: true },
+                                { name: 'Timestamp', value: new Date().toLocaleString(), inline: false }
+                            )
+                            .setFooter({ text: `Verified automatically via moogold.com` });
+
+                        await adminChannel.send({ embeds: [embed] });
+                        console.log(`📤 [Discord Bot] Admin transcript sent`);
+                    }
+
+                    if (guild) {
+                        try {
+                            const member = await guild.members.fetch(interaction.user.id);
+                            await member.roles.add(BOT_CONFIG.ROLE_VERIFIED_ID);
+                            console.log(`✅ [Discord Bot] Verified role assigned to ${interaction.user.tag}`);
+                        } catch (e) {
+                            console.error('[Discord Bot] Failed to assign role:', e instanceof Error ? e.message : String(e));
+                        }
+                    }
+
+                    await interaction.editReply({
+                        content: `✅ **Verification Successful!**\n\nYour Mobile Legends account **${playerName}** has been verified.\n✓ Check your DMs for confirmation\n✓ Verified role has been assigned\n✓ Enjoy full server access! 🎮`
+                    });
+
+                } catch (error) {
+                    console.error(`❌ [Discord Bot] Verification failed:`, error instanceof Error ? error.message : String(error));
+                    await interaction.editReply({
+                        content: `❌ **Verification Failed**\n\n${error instanceof Error ? error.message : String(error)}\n\nPlease make sure your Game ID and Server are correct.`
+                    });
+                }
+            }
+
+        } catch (error) {
+            console.error(`❌ [Discord Bot] Error:`, error);
+            try {
+                if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
+                    await interaction.reply({
+                        content: '❌ An error occurred. Please try again.',
+                        ephemeral: true
+                    });
+                }
+            } catch (e) {
+                console.error('[Discord Bot] Failed to reply:', e instanceof Error ? e.message : String(e));
+            }
+        }
+    });
+
+    try {
+        await client.login(BOT_CONFIG.BOT_TOKEN);
+        console.log('🚀 [Discord Bot] Bot starting...');
+    } catch (error) {
+        console.error('❌ [Discord Bot] Login failed:', error);
+    }
+}
+
+// Session middleware
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || "dev-secret-key",
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      secure: process.env.NODE_ENV === "production",
+      httpOnly: true,
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    },
+  })
+);
+
+app.use(
+  express.json({
+    verify: (req, _res, buf) => {
+      req.rawBody = buf;
+    },
+  }),
+);
+
+app.use(express.urlencoded({ extended: false }));
+
+export function log(message: string, source = "express") {
+  const formattedTime = new Date().toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  });
+
+  console.log(`${formattedTime} [${source}] ${message}`);
+}
+
+app.use((req, res, next) => {
+  const start = Date.now();
+  const path = req.path;
+  let capturedJsonResponse: Record<string, any> | undefined = undefined;
+
+  const originalResJson = res.json;
+  res.json = function (bodyJson, ...args) {
+    capturedJsonResponse = bodyJson;
+    return originalResJson.apply(res, [bodyJson, ...args]);
+  };
+
+  res.on("finish", () => {
+    const duration = Date.now() - start;
+    if (path.startsWith("/api")) {
+      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
+      if (capturedJsonResponse) {
+        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+      }
+
+      log(logLine);
+    }
+  });
+
+  next();
+});
+
+(async () => {
+  // Start Discord bot
+  startDiscordBot().catch(err => {
+    console.error('Failed to start Discord bot:', err);
+  });
+
+  await registerRoutes(httpServer, app);
+
+  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+    const status = err.status || err.statusCode || 500;
+    const message = err.message || "Internal Server Error";
+
+    res.status(status).json({ message });
+    throw err;
+  });
+
+  // importantly only setup vite in development and after
+  // setting up all the other routes so the catch-all route
+  // doesn't interfere with the other routes
+  if (process.env.NODE_ENV === "production") {
+    serveStatic(app);
+  } else {
+    const { setupVite } = await import("./vite");
+    await setupVite(httpServer, app);
+  }
+
+  // ALWAYS serve the app on the port specified in the environment variable PORT
+  // Other ports are firewalled. Default to 5000 if not specified.
+  // this serves both the API and the client.
+  // It is the only port that is not firewalled.
+  const port = parseInt(process.env.PORT || "5000", 10);
+  httpServer.listen(
+    {
+      port,
+      host: "0.0.0.0",
+      reusePort: true,
+    },
+    () => {
+      log(`serving on port ${port}`);
+    },
+  );
+})();

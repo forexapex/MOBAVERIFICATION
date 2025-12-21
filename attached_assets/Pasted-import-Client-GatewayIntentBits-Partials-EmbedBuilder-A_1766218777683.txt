@@ -1,0 +1,497 @@
+import { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, REST, Routes, ChannelType, ModalBuilder, TextInputBuilder, TextInputStyle, PermissionsBitField } from 'discord.js';
+import fs from 'fs';
+
+// --- CONFIGURATION ---
+const CONFIG = {
+    BOT_TOKEN: '',  // Fill this with your bot token
+    CLIENT_ID: '1451482666271772754',  // Your bot's client ID
+    
+    // No more hardcoded guild-specific configs; they are now stored per guild in configs.json
+};
+
+// --- IN-MEMORY STORAGE ---
+const otpCache = new Map(); // userId -> { otp, game, gameInput, guildId, expiresAt }
+const guildConfigs = new Map(); // guildId -> { roleVerifiedId, rolePendingId, channelVerifyId, channelAdminDashboardId, channelLogsId, allowedVerifyChannels, sendWelcomeDM }
+
+// --- PERSISTENCE FOR GUILD CONFIGS ---
+function loadGuildConfigs() {
+    if (fs.existsSync('configs.json')) {
+        const data = JSON.parse(fs.readFileSync('configs.json', 'utf8'));
+        for (const [guildId, config] of Object.entries(data)) {
+            guildConfigs.set(guildId, config);
+        }
+        console.log(`✅ Loaded configs for ${guildConfigs.size} guilds.`);
+    } else {
+        console.log('📄 No configs.json found. Starting fresh.');
+    }
+}
+
+function saveGuildConfigs() {
+    const data = Object.fromEntries(guildConfigs);
+    fs.writeFileSync('configs.json', JSON.stringify(data, null, 2));
+    console.log('💾 Guild configs saved.');
+}
+
+// --- CLIENT SETUP ---
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.DirectMessages,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMembers
+    ],
+    partials: [Partials.Channel]
+});
+
+// --- COMMANDS ---
+const commands = [
+    {
+        name: 'verify',
+        description: 'Start the verification process',
+        options: [
+            {
+                name: 'game',
+                type: 3,  // String
+                description: 'Game to verify for',
+                required: true,
+                choices: [
+                    { name: 'MLBB', value: 'mlbb' },
+                    { name: 'BGMI', value: 'bgmi' },
+                    { name: 'Valorant', value: 'valo' }
+                ]
+            }
+        ]
+    },
+    {
+        name: 'setup',
+        description: 'Setup the verification system (admin only)',
+        options: [
+            { name: 'role_verified', type: 8, description: 'Verified role', required: true },  // Role
+            { name: 'role_pending', type: 8, description: 'Pending role', required: true },   // Role
+            { name: 'channel_verify', type: 7, description: 'Verify channel', required: true },  // Channel
+            { name: 'channel_admin_dashboard', type: 7, description: 'Admin dashboard channel', required: true },  // Channel
+            { name: 'channel_logs', type: 7, description: 'Staff logs channel', required: true }  // Channel
+        ]
+    }
+];
+
+const rest = new REST({ version: '10' }).setToken(CONFIG.BOT_TOKEN);
+
+async function registerCommands() {
+    try {
+        console.log('🔄 Started refreshing global application (/) commands.');
+        await rest.put(
+            Routes.applicationCommands(CONFIG.CLIENT_ID),
+            { body: commands }
+        );
+        console.log('✅ Successfully reloaded global application (/) commands.');
+    } catch (error) {
+        console.error('❌ Error registering commands:', error);
+    }
+}
+
+function generateOTP() {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+// --- EVENTS ---
+
+client.once('ready', async () => {
+    loadGuildConfigs();
+    console.log(`✅ Logged in as ${client.user.tag}!`);
+    await registerCommands();
+});
+
+// New User Join - Send welcome DM if configured
+client.on('guildMemberAdd', async member => {
+    const guildConfig = guildConfigs.get(member.guild.id);
+    if (!guildConfig || !guildConfig.sendWelcomeDM) return;
+
+    console.log(`👤 New member joined: ${member.user.tag} in guild ${member.guild.name}`);
+
+    try {
+        const welcomeMessage = `
+🎮 **Welcome to the Gaming Community!** 🎮
+
+We're thrilled to have you join our community — welcome aboard! 👋✨
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**📋 ACCOUNT VERIFICATION**
+
+To unlock all server features and join our community, you need to verify your account!
+
+**Verify with Game ID**
+1. Go to the verify channel in the server
+2. Use the /verify command and select your game (MLBB, BGMI, or Valorant)
+3. Enter your Game ID / Riot ID
+4. Complete OTP verification in this DM
+5. Wait for admin approval
+6. Get the Verified role!
+
+**Server Verification**
+• If alternative verification is needed, contact server moderators
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**📚 GETTING STARTED**
+
+1. 🔐 Read server rules
+2. 🎮 Grab your game roles
+3. 🙋 Introduce yourself in game-specific chats
+4. ✅ Verify your account (see above)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**Once verified, you can:**
+💬 Chat & share gameplay highlights
+🏆 Participate in tournaments
+👥 Team up with other players
+📢 Stay updated with events & announcements
+
+**Questions?** Contact the server moderators!
+
+Glad to have you with us — enjoy your stay! 🚀
+`;
+        await member.send(welcomeMessage);
+        console.log(`📧 Welcome DM sent to ${member.user.tag}`);
+    } catch (error) {
+        console.error(`❌ Failed to send welcome DM to ${member.user.tag}:`, error.message);
+    }
+});
+
+// Interaction Handler
+client.on('interactionCreate', async interaction => {
+    try {
+        // Handle chat input commands
+        if (interaction.isChatInputCommand()) {
+            const guildConfig = guildConfigs.get(interaction.guildId);
+            if (!guildConfig) {
+                return await interaction.reply({ content: '❌ This server is not set up for verification. An admin must run /setup first.', ephemeral: true });
+            }
+
+            if (interaction.commandName === 'verify') {
+                console.log(`📝 /verify command received from ${interaction.user.tag} in guild ${interaction.guild.name}, channel ${interaction.channelId}`);
+                
+                // Check if command is allowed in this channel
+                const isPrimaryVerifyChannel = guildConfig.channelVerifyId === interaction.channelId;
+                const isAllowedChannel = guildConfig.allowedVerifyChannels?.includes(interaction.channelId) || false;
+                
+                console.log(`  isPrimary: ${isPrimaryVerifyChannel}, isAllowed: ${isAllowedChannel}`);
+                
+                if (!isPrimaryVerifyChannel && !isAllowedChannel) {
+                    console.log(`  ❌ Channel not allowed`);
+                    const allowedList = guildConfig.allowedVerifyChannels?.map(id => `<#${id}>`).join(', ') || '';
+                    return await interaction.reply({ 
+                        content: `This command can only be used in <#${guildConfig.channelVerifyId}> or ${allowedList}`, 
+                        ephemeral: true 
+                    });
+                }
+
+                const game = interaction.options.getString('game');
+
+                // Create and show modal
+                const modal = new ModalBuilder()
+                    .setCustomId('verifyModal')
+                    .setTitle(`${game.toUpperCase()} Verification`);
+
+                const inputLabel = game === 'valo' ? 'Enter your Riot ID (name#tag)' : 'Enter your Game ID (numeric)';
+                const gameInput = new TextInputBuilder()
+                    .setCustomId('gameInput')
+                    .setLabel(inputLabel)
+                    .setStyle(TextInputStyle.Short)
+                    .setMinLength(5)
+                    .setMaxLength(50)  // Increased for Riot ID
+                    .setRequired(true);
+
+                modal.addComponents(new ActionRowBuilder().addComponents(gameInput));
+
+                console.log(`  ✅ Showing modal for ${game}`);
+                await interaction.showModal(modal);
+            } else if (interaction.commandName === 'setup') {
+                console.log(`🛠️ /setup command received from ${interaction.user.tag} in guild ${interaction.guild.name}`);
+                
+                // Check admin permissions
+                if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+                    console.log(`  ❌ Not admin`);
+                    return await interaction.reply({ content: '❌ You must be an administrator to use this command.', ephemeral: true });
+                }
+
+                // Get options
+                const roleVerifiedId = interaction.options.getRole('role_verified').id;
+                const rolePendingId = interaction.options.getRole('role_pending').id;
+                const channelVerifyId = interaction.options.getChannel('channel_verify').id;
+                const channelAdminDashboardId = interaction.options.getChannel('channel_admin_dashboard').id;
+                const channelLogsId = interaction.options.getChannel('channel_logs').id;
+
+                // Save config
+                guildConfigs.set(interaction.guildId, {
+                    roleVerifiedId,
+                    rolePendingId,
+                    channelVerifyId,
+                    channelAdminDashboardId,
+                    channelLogsId,
+                    allowedVerifyChannels: [channelVerifyId],  // Start with verify channel; can extend later
+                    sendWelcomeDM: true
+                });
+                saveGuildConfigs();
+
+                console.log(`  ✅ Setup complete for guild ${interaction.guild.name}`);
+                await interaction.reply({ content: '✅ Server setup complete! Verification system is now active.', ephemeral: true });
+            }
+            return;
+        }
+
+        // Handle modal submission
+        if (interaction.isModalSubmit()) {
+            if (interaction.customId === 'verifyModal') {
+                console.log(`📋 Modal submitted by ${interaction.user.tag} in guild ${interaction.guild.name}`);
+                
+                const gameInput = interaction.fields.getTextInputValue('gameInput');
+                console.log(`  Game Input: ${gameInput}`);
+                
+                // Get game from otpCache? Wait, no: game is from command, but since modal is separate, need to rethink.
+                // Problem: modal submit doesn't have the game option from command.
+                // Solution: Since game is required in command, but to link, perhaps store temp data or include in customId, but customId fixed.
+                // Better: make modal customId include game, like 'verifyModal_mlbb'
+                // But since game is in options, when showing modal, set customId `verifyModal_${game}`
+
+                // FIX: Adjust the code to set customId with game
+                // Wait, since this is the fixed code, I'll adjust accordingly.
+
+                // For this version, assume we need to pass game to modal submit.
+                // One way: but since no state, better to change customId to include game.
+
+                // Let's adjust: in verify handling, set modal.setCustomId(`verifyModal_${game}`)
+
+                // Then, in isModalSubmit, if (interaction.customId.startsWith('verifyModal_'))
+                // const game = interaction.customId.split('_')[1]
+
+                if (interaction.customId.startsWith('verifyModal_')) {
+                    const game = interaction.customId.split('_')[1];
+                    const gameInput = interaction.fields.getTextInputValue('gameInput');
+
+                    // Validate input based on game
+                    let isValid = true;
+                    if (game !== 'valo') {
+                        if (!/^\d+$/.test(gameInput)) {
+                            isValid = false;
+                        }
+                    } else {
+                        if (!gameInput.includes('#')) {
+                            isValid = false;
+                        }
+                    }
+
+                    if (!isValid) {
+                        console.log(`  ❌ Invalid format for ${game}`);
+                        return await interaction.reply({ 
+                            content: `❌ Invalid input for ${game.toUpperCase()}. Please try again.`, 
+                            ephemeral: true 
+                        });
+                    }
+
+                    // Generate OTP
+                    const otp = generateOTP();
+                    const expiresAt = Date.now() + 5 * 60 * 1000;
+                    otpCache.set(interaction.user.id, { otp, game, gameInput, guildId: interaction.guildId, expiresAt });
+                    
+                    console.log(`  ✅ OTP generated: ${otp} for ${game}`);
+
+                    // Send OTP via DM
+                    try {
+                        await interaction.user.send(
+                            `🔐 Your verification code for ${game.toUpperCase()} is: **${otp}**\n\nReply with this code in this DM within 5 minutes.`
+                        );
+                        console.log(`  ✅ OTP sent via DM`);
+                        
+                        return await interaction.reply({ 
+                            content: '✅ I have sent you a DM with a verification code. Please check your Direct Messages.', 
+                            ephemeral: true 
+                        });
+                    } catch (dmError) {
+                        console.error(`  ❌ Could not send DM:`, dmError.message);
+                        return await interaction.reply({ 
+                            content: '❌ I could not send you a DM. Please make sure your DMs are open.', 
+                            ephemeral: true 
+                        });
+                    }
+                }
+            }
+            return;
+        }
+
+        // Handle button clicks (approve/deny)
+        if (interaction.isButton()) {
+            console.log(`🔘 Button clicked by ${interaction.user.tag}: ${interaction.customId}`);
+            
+            const parts = interaction.customId.split('_');
+            const action = parts[0];
+            const targetUserId = parts[1];
+            const game = parts[2];
+            const gameInput = parts[3];
+            const guild = interaction.guild;
+            const guildConfig = guildConfigs.get(guild.id);
+
+            if (!guildConfig) return;
+
+            if (action === 'approve') {
+                console.log(`  ✅ Approving user ${targetUserId} for ${game}`);
+                
+                const member = await guild.members.fetch(targetUserId).catch(() => null);
+                
+                if (member) {
+                    try {
+                        // Remove pending role
+                        await member.roles.remove(guildConfig.rolePendingId).catch(() => {});
+                        // Add verified role
+                        await member.roles.add(guildConfig.roleVerifiedId);
+                        // Notify user
+                        await member.send(`✅ Congratulations! You are verified for ${game.toUpperCase()} with ID: ${gameInput}!`);
+                        console.log(`  ✅ Roles updated and DM sent`);
+                    } catch (e) {
+                        console.error(`  ❌ Role update failed:`, e.message);
+                    }
+                }
+                
+                await interaction.update({ 
+                    content: `✅ Request Approved by <@${interaction.user.id}>`, 
+                    components: [] 
+                });
+                
+                // Log to staff logs
+                const logChannel = guild.channels.cache.get(guildConfig.channelLogsId);
+                if (logChannel) {
+                    await logChannel.send(`✅ User <@${targetUserId}> verified for ${game.toUpperCase()} by <@${interaction.user.id}>. ID: ${gameInput}`);
+                }
+            } 
+            else if (action === 'deny') {
+                console.log(`  ❌ Denying user ${targetUserId}`);
+                
+                const member = await guild.members.fetch(targetUserId).catch(() => null);
+                
+                if (member) {
+                    try {
+                        await member.roles.remove(guildConfig.rolePendingId).catch(() => {});
+                        await member.send(`❌ Verification denied for ${game ? game.toUpperCase() : 'game'}: Invalid input. Please check and try again.`);
+                    } catch (e) {
+                        console.error(`  ❌ Failed to notify user:`, e.message);
+                    }
+                }
+                
+                await interaction.update({ 
+                    content: `❌ Request Denied by <@${interaction.user.id}>`, 
+                    components: [] 
+                });
+                
+                // Log to staff logs
+                const logChannel = guild.channels.cache.get(guildConfig.channelLogsId);
+                if (logChannel) {
+                    await logChannel.send(`❌ User <@${targetUserId}> denied by <@${interaction.user.id}>.`);
+                }
+            }
+            return;
+        }
+    } catch (error) {
+        console.error(`❌ Interaction error:`, error);
+        
+        // Try to reply with error if not already replied
+        try {
+            if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
+                await interaction.reply({ 
+                    content: '❌ An error occurred. Please try again.', 
+                    ephemeral: true 
+                });
+            } else if (!interaction.replied && !interaction.deferred) {
+                await interaction.followUp({ 
+                    content: '❌ An error occurred. Please try again.', 
+                    ephemeral: true 
+                });
+            }
+        } catch (replyError) {
+            console.error(`❌ Failed to send error reply:`, replyError.message);
+        }
+    }
+});
+
+// DM OTP Handler
+client.on('messageCreate', async message => {
+    if (message.author.bot) return;
+    if (message.channel.type !== ChannelType.DM) return;
+
+    const userId = message.author.id;
+    const data = otpCache.get(userId);
+
+    if (!data) return;
+
+    console.log(`💬 DM received from ${message.author.tag}`);
+
+    // Check if OTP expired
+    if (Date.now() > data.expiresAt) {
+        console.log(`  ❌ OTP expired`);
+        otpCache.delete(userId);
+        return await message.reply('❌ OTP has expired. Please run /verify again in the server.');
+    }
+
+    // Check if OTP matches
+    if (message.content.trim() === data.otp) {
+        console.log(`  ✅ OTP verified`);
+        otpCache.delete(userId);
+        
+        await message.reply('✅ OTP Verified! Request sent to admins for approval.');
+
+        // Add pending role and send to admin dashboard
+        try {
+            const guild = await client.guilds.fetch(data.guildId);
+            const guildConfig = guildConfigs.get(data.guildId);
+            if (!guildConfig) throw new Error('Guild config not found');
+
+            const member = await guild.members.fetch(userId);
+            
+            if (member) {
+                await member.roles.add(guildConfig.rolePendingId);
+                console.log(`  ✅ Pending role added to ${member.user.tag}`);
+            }
+
+            // Send to admin dashboard
+            const adminChannel = guild.channels.cache.get(guildConfig.channelAdminDashboardId);
+            if (adminChannel) {
+                const embed = new EmbedBuilder()
+                    .setTitle('🆕 New Verification Request')
+                    .addFields(
+                        { name: 'User', value: `<@${userId}>`, inline: true },
+                        { name: 'Game', value: data.game.toUpperCase(), inline: true },
+                        { name: 'ID', value: data.gameInput, inline: true },
+                        { name: 'Time', value: new Date().toLocaleString(), inline: false }
+                    )
+                    .setColor('Blue');
+
+                const row = new ActionRowBuilder()
+                    .addComponents(
+                        new ButtonBuilder()
+                            .setCustomId(`approve_${userId}_${data.game}_${data.gameInput}`)
+                            .setLabel('✅ Approve')
+                            .setStyle(ButtonStyle.Success),
+                        new ButtonBuilder()
+                            .setCustomId(`deny_${userId}`)
+                            .setLabel('❌ Deny')
+                            .setStyle(ButtonStyle.Danger)
+                    );
+
+                await adminChannel.send({ embeds: [embed], components: [row] });
+                console.log(`  ✅ Admin request sent to dashboard`);
+            } else {
+                console.error('  ❌ Admin dashboard channel not found!');
+            }
+        } catch (error) {
+            console.error(`  ❌ Error processing verification:`, error.message);
+        }
+    } else {
+        console.log(`  ❌ Incorrect OTP`);
+        await message.reply('❌ Incorrect OTP. Please try again.');
+    }
+});
+
+// Login
+client.login(CONFIG.BOT_TOKEN);
