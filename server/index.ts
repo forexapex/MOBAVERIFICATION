@@ -4,7 +4,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import session from "express-session";
 import { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, REST, Routes } from 'discord.js';
-import axios from 'axios';
+import { validasi } from "./lib/validasi";
 
 const app = express();
 const httpServer = createServer(app);
@@ -17,7 +17,7 @@ declare module "http" {
 
 // Discord Bot Configuration
 const BOT_CONFIG = {
-    BOT_TOKEN: '',
+    BOT_TOKEN: process.env.DISCORD_BOT_TOKEN || '',
     CLIENT_ID: '1451482666271772754',
     GUILD_ID: '1439165596725022753',
     CHANNEL_VERIFY_ID: '1439165986564477038',
@@ -25,43 +25,13 @@ const BOT_CONFIG = {
     ROLE_VERIFIED_ID: '1451490702348259409',
 };
 
-// Discord Bot Setup
-async function verifyMLBBAccount(gameId: string, serverId: string) {
-    try {
-        const data = await axios.post("https://moogold.com/wp-content/plugins/id-validation-new/id-validation-ajax.php", new URLSearchParams({
-            "attribute_amount": "Weekly Pass",
-            "text-5f6f144f8ffee": gameId,
-            "text-1601115253775": serverId,
-            "quantity": 1,
-            "add-to-cart": 15145,
-            "product_id": 15145,
-            "variation_id": 4690783
-        }), {
-            headers: {
-                "Referer": "https://moogold.com/product/mobile-legends/",
-                "Origin": "https://moogold.com"
-            }
-        });
-
-        const { message } = data.data;
-        if (!message) throw new Error('Invalid ID or Server');
-        
-        const lines = message.split("\n");
-        const result: Record<string, string> = {};
-        lines.forEach(line => {
-            const [key, value] = line.split(":");
-            if (key && value) {
-                result[key.trim().toLowerCase().replace(/ /g, "-")] = value.trim();
-            }
-        });
-        
-        return result;
-    } catch (error) {
-        throw new Error('Verification failed: ' + (error instanceof Error ? error.message : String(error)));
-    }
-}
 
 async function startDiscordBot() {
+    if (!BOT_CONFIG.BOT_TOKEN) {
+        console.warn('⚠️ [Discord Bot] Bot token not configured. Skipping bot startup.');
+        return;
+    }
+
     const commands = [{ name: 'verify', description: 'Verify your Mobile Legends account' }];
     const rest = new REST({ version: '10' }).setToken(BOT_CONFIG.BOT_TOKEN);
 
@@ -89,7 +59,7 @@ async function startDiscordBot() {
         }
     }
 
-    client.once('ready', async () => {
+    client.once('clientReady', async () => {
         console.log(`✅ [Discord Bot] Logged in as ${client.user?.tag}`);
         await registerCommands();
     });
@@ -103,7 +73,7 @@ async function startDiscordBot() {
                 if (!isAllowedChannel) {
                     return await interaction.reply({
                         content: `❌ This command can only be used in <#${BOT_CONFIG.CHANNEL_VERIFY_ID}>`,
-                        ephemeral: true
+                        flags: ['Ephemeral']
                     });
                 }
 
@@ -113,15 +83,17 @@ async function startDiscordBot() {
 
                 const gameIdInput = new TextInputBuilder()
                     .setCustomId('gameIdInput')
-                    .setLabel('Enter your Game ID (9-10 digits)')
+                    .setLabel('Game ID (9-10 digits)')
                     .setStyle(TextInputStyle.Short)
-                    .setRequired(true);
+                    .setRequired(true)
+                    .setPlaceholder('e.g., 123456789');
 
                 const serverInput = new TextInputBuilder()
                     .setCustomId('serverInput')
-                    .setLabel('Enter your Server (SEA, GLOBAL, AMERICAS, EUROPE)')
+                    .setLabel('Server ID')
                     .setStyle(TextInputStyle.Short)
-                    .setRequired(true);
+                    .setRequired(true)
+                    .setPlaceholder('e.g., 20345');
 
                 modal.addComponents(
                     new ActionRowBuilder<TextInputBuilder>().addComponents(gameIdInput),
@@ -137,21 +109,41 @@ async function startDiscordBot() {
                 const gameId = interaction.fields.getTextInputValue('gameIdInput');
                 const serverId = interaction.fields.getTextInputValue('serverInput');
 
-                await interaction.deferReply({ ephemeral: true });
+                await interaction.deferReply({ flags: ['Ephemeral'] });
 
                 try {
-                    console.log(`🔍 [Discord Bot] Verifying Game ID: ${gameId}, Server: ${serverId}`);
-                    const playerData = await verifyMLBBAccount(gameId, serverId);
+                    // Validate server ID is numeric
+                    if (!/^\d+$/.test(serverId)) {
+                        return await interaction.editReply({
+                            content: `❌ Invalid Server ID. Please enter a numeric server ID (e.g., 20345).`
+                        });
+                    }
 
-                    const playerName = playerData['player-name'] || 'Unknown';
-                    const playerLevel = playerData['level'] || '?';
-                    const playerRegion = playerData['region'] || serverId;
+                    console.log(`🔍 [Discord Bot] Verifying Game ID: ${gameId}, Server ID: ${serverId}`);
+                    const playerData = await validasi(gameId, serverId);
+                    console.log(`📊 [Discord Bot] Player data:`, playerData);
+
+                    // Extract player name from possible field names
+                    const playerName = playerData['username'] || playerData['in-game-nickname'] || playerData['player-name'] || 'Unknown';
+                    // Extract level - try multiple field name variations
+                    let playerLevel = playerData['level'] || playerData['user-level'] || playerData['player-level'] || '';
+                    // If level is still empty, check for numeric values in playerData
+                    if (!playerLevel) {
+                      for (const [key, value] of Object.entries(playerData)) {
+                        if (key.includes('level') && value && /^\d+$/.test(value)) {
+                          playerLevel = value;
+                          break;
+                        }
+                      }
+                    }
+                    playerLevel = playerLevel || 'Not Available';
+                    const playerRegion = playerData['region'] || playerData['zone'] || serverId;
 
                     console.log(`✅ [Discord Bot] Account verified: ${playerName}`);
 
                     try {
                         await interaction.user.send(
-                            `✅ **Congratulations!**\n\nYour Mobile Legends account **${playerName}** (Level ${playerLevel}, ${playerRegion}) has been verified!\n\nYou now have access to all server channels. Welcome to IPEORG! 🎮`
+                            `✅ **Congratulations!**\n\nYour Mobile Legends account **${playerName}** (Level ${playerLevel}, ${playerRegion}) has been verified!\n\nYou now have access to all server channels. Welcome to IPEORG!`
                         );
                     } catch (e) {
                         console.error('[Discord Bot] Failed to send DM:', e instanceof Error ? e.message : String(e));
@@ -190,7 +182,7 @@ async function startDiscordBot() {
                     }
 
                     await interaction.editReply({
-                        content: `✅ **Verification Successful!**\n\nYour Mobile Legends account **${playerName}** has been verified.\n✓ Check your DMs for confirmation\n✓ Verified role has been assigned\n✓ Enjoy full server access! 🎮`
+                        content: `✅ **Verification Successful!**\n\nYour Mobile Legends account **${playerName}** has been verified.\n✓ Check your DMs for confirmation\n✓ Verified role has been assigned\n✓ Enjoy full server access!`
                     });
 
                 } catch (error) {
@@ -207,7 +199,7 @@ async function startDiscordBot() {
                 if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
                     await interaction.reply({
                         content: '❌ An error occurred. Please try again.',
-                        ephemeral: true
+                        flags: ['Ephemeral']
                     });
                 }
             } catch (e) {

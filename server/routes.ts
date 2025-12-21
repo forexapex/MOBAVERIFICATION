@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { api } from "@shared/routes";
+import { validasi } from "./lib/validasi";
 import axios from "axios";
 import session from "express-session";
 
@@ -119,27 +120,57 @@ export async function registerRoutes(
   });
 
   // MLBB Game ID Verification API
-  app.get("/api/mlbb/verify/:gameId", async (req, res) => {
+  app.get("/api/mlbb/verify", async (req, res) => {
     try {
-      const gameId = req.params.gameId;
+      const gameId = req.query.id as string;
+      const serverId = req.query.serverid as string;
       
-      // Validate game ID format (should be numeric)
-      if (!/^\d+$/.test(gameId)) {
-        return res.status(400).json({ valid: false, error: "Invalid Game ID format" });
+      if (!gameId || !serverId) {
+        return res.status(400).json({ status: "failed", message: "Missing id or serverid parameter" });
       }
 
-      // Mock MLBB API response - in real world, you'd call actual MLBB API
-      // For now, we accept numeric IDs as valid
+      // Validate server ID is numeric
+      if (!/^\d+$/.test(serverId)) {
+        return res.status(400).json({ 
+          status: "failed", 
+          message: "Invalid Server ID. Please enter a numeric server ID (e.g., 20345)." 
+        });
+      }
+
+      const playerData = await validasi(gameId, serverId);
+      
+      // Extract fields with fallback options
+      const nickname = playerData['username'] || playerData['in-game-nickname'] || 'Unknown';
+      let level = playerData['level'] || playerData['user-level'] || playerData['player-level'] || '';
+      // If level is still empty, search for any level field
+      if (!level) {
+        for (const [key, value] of Object.entries(playerData)) {
+          if (key.includes('level') && value && /^\d+$/.test(value)) {
+            level = value;
+            break;
+          }
+        }
+      }
+      level = level || 'Not Available';
+      const zone = playerData['zone'] || playerData['region'] || serverId;
+      const country = playerData['country'] || 'Unknown';
+
       res.json({
-        valid: true,
-        gameId: gameId,
-        nickname: `Player_${gameId.slice(-4)}`, // Mock nickname
-        level: Math.floor(Math.random() * 50) + 1,
-        zone: gameId.length === 9 ? "SEA" : "GLOBAL",
-        lastUpdated: new Date().toISOString()
+        status: "success",
+        result: {
+          gameId: gameId,
+          serverId: serverId,
+          nickname: nickname,
+          level: level,
+          zone: zone,
+          country: country
+        }
       });
     } catch (error) {
-      res.status(500).json({ valid: false, error: "Verification failed" });
+      res.status(400).json({ 
+        status: "failed",
+        message: error instanceof Error ? error.message : "Verification failed" 
+      });
     }
   });
 

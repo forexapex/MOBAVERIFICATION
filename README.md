@@ -6,11 +6,12 @@ Advanced Discord automation platform for the IPEORG MLBB (Mobile Legends: Bang B
 
 ### 🤖 Discord Bot
 - **Instant Game Verification**: Direct Mobile Legends account verification via moogold.com API
-- **Modal-based Interface**: User-friendly `/verify` command with Game ID and Server selection
+- **Modal-based Interface**: User-friendly `/verify` command with Game ID and Server ID input
 - **Automatic Role Assignment**: Verified role granted instantly upon successful verification
 - **Admin Transcripts**: Complete audit logs of all verifications sent to admin channel
 - **Direct Messages**: Verification confirmations sent via Discord DMs
-- **Multi-region Support**: SEA, GLOBAL, AMERICAS, EUROPE server regions
+- **Server ID Support**: Numeric server IDs (e.g., 20345) for accurate region verification
+- **Real-time Player Data**: Displays player username, level, and region information
 
 ### 📊 Admin Dashboard
 - **User Management**: View and manage verified users
@@ -38,7 +39,7 @@ Advanced Discord automation platform for the IPEORG MLBB (Mobile Legends: Bang B
 
 ```env
 # Discord Bot
-BOT_TOKEN=your_discord_bot_token
+DISCORD_BOT_TOKEN=your_discord_bot_token
 CLIENT_ID=your_discord_client_id
 GUILD_ID=your_discord_server_id
 
@@ -93,12 +94,21 @@ Initiates the Mobile Legends account verification process.
 **Usage**: Type `/verify` in the configured verification channel or DM
 
 **Modal Fields**:
-- Game ID: Your 9-10 digit Mobile Legends account ID
-- Server: Choose from SEA, GLOBAL, AMERICAS, or EUROPE
+- Game ID: Your 9-10 digit Mobile Legends account ID (e.g., 123456789)
+- Server ID: Your numeric server ID (e.g., 20345)
 
 **Response**: 
 - ✅ If valid: Role assigned, DM confirmation, admin transcript logged
 - ❌ If invalid: Error message with troubleshooting tips
+
+**Example DM Response**:
+```
+✅ Congratulations!
+
+Your Mobile Legends account **PlayerName** (Level 45, 20345) has been verified!
+
+You now have access to all server channels. Welcome to IPEORG!
+```
 
 ## 🏗️ Project Structure
 
@@ -124,6 +134,9 @@ Initiates the Mobile Legends account verification process.
 │   ├── index.ts                      # Express server & Discord bot
 │   ├── routes.ts                     # API endpoints
 │   ├── storage.ts                    # Data persistence
+│   ├── lib/
+│   │   ├── validasi.ts               # MLBB verification library
+│   │   └── util.ts                   # Utility functions
 │   ├── schema.ts                     # Database schema
 │   └── vite.ts                       # Vite setup
 ├── shared/
@@ -134,17 +147,41 @@ Initiates the Mobile Legends account verification process.
 
 ## 🔌 API Endpoints
 
-### Authentication
-- `GET /auth/discord` - Discord OAuth callback
-- `POST /auth/logout` - Logout user
-
-### Users
-- `GET /api/users` - Get all verified users
-- `GET /api/users/:id` - Get user details
-
 ### Verification
-- `POST /api/verify` - Submit verification request
-- `GET /api/verify/history` - Get verification history
+- `GET /api/mlbb/verify?id=123456789&serverid=20345` - Verify MLBB account
+
+**Success Response**:
+```json
+{
+  "status": "success",
+  "result": {
+    "gameId": "123456789",
+    "serverId": "20345",
+    "nickname": "PlayerName",
+    "level": "45",
+    "zone": "SEA",
+    "country": "Philippines"
+  }
+}
+```
+
+**Error Response**:
+```json
+{
+  "status": "failed",
+  "message": "Invalid ID Player or Server ID"
+}
+```
+
+### Authentication
+- `GET /api/callback` - Discord OAuth callback
+- `POST /api/logout` - Logout user
+- `GET /api/user/guilds` - Get user guilds (admin only)
+
+### Admin
+- `GET /api/guilds/:guildId/verifications` - Get guild verifications
+- `POST /api/verifications/:id/approve` - Approve verification
+- `POST /api/verifications/:id/deny` - Deny verification
 
 ## 🔐 Security Features
 
@@ -153,6 +190,7 @@ Initiates the Mobile Legends account verification process.
 - **Data Encryption**: Secure transmission of sensitive information
 - **Audit Logs**: Complete verification history for moderation
 - **API Validation**: Zod schema validation for all requests
+- **Input Validation**: Server ID format validation (numeric only)
 
 ## 🛠️ Tech Stack
 
@@ -163,6 +201,7 @@ Initiates the Mobile Legends account verification process.
 - **TanStack Query** for server state management
 - **Framer Motion** for animations
 - **shadcn/ui** for UI components
+- **Wouter** for lightweight routing
 
 ### Backend
 - **Express.js** for HTTP server
@@ -170,6 +209,7 @@ Initiates the Mobile Legends account verification process.
 - **Drizzle ORM** for database access
 - **Zod** for runtime validation
 - **PostgreSQL/Neon** for data persistence
+- **Axios** for HTTP requests
 
 ### Infrastructure
 - **Node.js** runtime
@@ -184,9 +224,11 @@ id          INT PRIMARY KEY
 discord_id  BIGINT UNIQUE
 username    VARCHAR
 game_id     VARCHAR
-server      VARCHAR
+server_id   VARCHAR
+level       INT
 verified    BOOLEAN
 created_at  TIMESTAMP
+updated_at  TIMESTAMP
 ```
 
 ### Verification Logs Table
@@ -195,10 +237,83 @@ id          INT PRIMARY KEY
 user_id     INT FOREIGN KEY
 status      VARCHAR ('pending', 'verified', 'failed')
 game_id     VARCHAR
-server      VARCHAR
+server_id   VARCHAR
 error       TEXT
 created_at  TIMESTAMP
 ```
+
+## 🎯 Feature Roadmap - What You Can Add
+
+### 1. **User Profiles**
+   - Personal verification history
+   - Account statistics (games played, wins, etc.)
+   - Badge/achievement system for verified users
+   - Profile customization options
+
+### 2. **Advanced Analytics Dashboard**
+   - Verification statistics and trends
+   - Server-wide player level distribution
+   - Top verified players leaderboard
+   - Real-time verification metrics
+
+### 3. **Automated Role Management**
+   - Multiple verification tiers (Verified, Diamond, Legend, etc.)
+   - Auto-demote users if they drop levels
+   - Role-based channel access
+   - Custom role assignments per region
+
+### 4. **Notification System**
+   - Discord notifications for milestone achievements
+   - Weekly/monthly leaderboard updates
+   - New member verification alerts
+   - Admin moderation notifications
+
+### 5. **API Documentation Portal**
+   - Interactive API explorer
+   - Code examples in multiple languages
+   - Webhook support for external integrations
+   - Rate limit documentation
+
+### 6. **Anti-Fraud System**
+   - Duplicate account detection
+   - Suspicious activity alerts
+   - Account linking restrictions
+   - Manual review queue for edge cases
+
+### 7. **Community Features**
+   - Clan/team creation and management
+   - Team verification (verify all members)
+   - Community events and tournaments
+   - Team statistics and rankings
+
+### 8. **Integration Features**
+   - Streaming notifications (Twitch/YouTube)
+   - Match result auto-logging
+   - Stat sync with MLBB API
+   - External tournament support
+
+### 9. **Moderation Tools**
+   - Custom warning system
+   - Temporary/permanent bans
+   - Appeal process for rejected verifications
+   - Verification recheck mechanism
+
+### 10. **Mobile App**
+   - iOS/Android app for verification
+   - Push notifications
+   - Quick access to player stats
+   - Native platform integration
+
+### 11. **Multi-Language Support**
+   - Bot responses in multiple languages
+   - Regional language preferences
+   - Localized UI
+
+### 12. **Economy System**
+   - In-server currency for verified players
+   - Shop for cosmetics/perks
+   - Reward system for participation
+   - Points-based achievements
 
 ## 🤝 Contributing
 
@@ -236,6 +351,6 @@ This project is not affiliated with or endorsed by Moonton Games or Mobile Legen
 
 **Last Updated**: December 21, 2024
 
-**Version**: 1.0.0
+**Version**: 1.1.0
 
 For the latest updates and news, follow us on Discord and GitHub!
