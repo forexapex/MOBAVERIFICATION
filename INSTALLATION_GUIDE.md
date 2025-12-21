@@ -272,7 +272,7 @@ sudo systemctl status ipeorg-bot
 Edit `index.js` CONFIG section:
 ```javascript
 const CONFIG = {
-    BOT_TOKEN: 'MTQ1MTQ4MjY2NjI3MTc3Mjc1NA.G9dg1e.V8I-c-2K652-43uTH3593a1g6byy6vx2a-1FsA',
+    BOT_TOKEN: '',
     CLIENT_ID: '1451482666271772754',
     GUILD_ID: '1439165596725022753',
     ROLE_VERIFIED_ID: '1439165896806498425',
