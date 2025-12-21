@@ -1,0 +1,303 @@
+import os
+import discord
+from discord import app_commands
+from discord.ext import tasks, commands
+import aiohttp
+import pymongo
+from datetime import datetime
+
+# Environment variables
+DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
+MONGO_URI = os.getenv('MONGO_URI')
+MLBB_API_KEY = os.getenv('MLBB_API_KEY')  # Get your API key from the provider
+GUILD_ID = 123456789012345678  # Replace with your actual Discord server (guild) ID
+
+# Role mapping based on user-provided IDs
+ROLE_MAP = {
+    "Warrior": 1452232717339983914,
+    "Elite": 1452232985712787497,
+    "Master": 1452233028209348660,
+    "Grandmaster": 1452233083431555115,
+    "Epic": 1452233113609441310,
+    "Legend": 1452233142986342420,
+    "Mythic": 1452233677839794228,
+    "Mythical Glory": 1452233176570269719
+}
+
+# List of all rank role IDs for easy removal
+RANK_ROLE_IDS = list(ROLE_MAP.values())
+
+# MongoDB setup
+client = pymongo.MongoClient(MONGO_URI)
+db = client["mlbb_bot"]
+users = db["users"]
+
+# Bot setup
+intents = discord.Intents.default()
+intents.members = True  # Needed for role management
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+async def parse_rank(player_data):
+    """
+    Parse the rank from API response.
+    Assumption: API returns {'tier': str, 'stars': int} or similar.
+    Adjust based on actual API response structure.
+    """
+    tier = player_data.get('tier', '').lower()  # e.g., 'mythic'
+    stars = player_data.get('stars', 0)  # For Mythic sub-tiers
+
+    # Normalize lower ranks (e.g., 'Warrior III' -> 'Warrior')
+    if 'warrior' in tier:
+        return "Warrior"
+    elif 'elite' in tier:
+        return "Elite"
+    elif 'master' in tier:
+        return "Master"
+    elif 'grandmaster' in tier:
+        return "Grandmaster"
+    elif 'epic' in tier:
+        return "Epic"
+    elif 'legend' in tier:
+        return "Legend"
+    elif 'mythic' in tier:
+        if stars >= 50:
+            return "Mythical Glory"  # Covers Glory (50+) and Immortal (100+)
+        else:
+            return "Mythic"  # Covers base Mythic (0-24) and Honor (25-49)
+    else:
+        return None  # Unknown rank
+
+async def fetch_mlbb_rank(mlbb_id: str, server_id: str):
+    """
+    Fetch player's rank from MLBB API.
+    Using unofficial API from https://mlbb-api.aimar.id/v1 (adjust if down or use alternative).
+    """
+    url = f"https://mlbb-api.aimar.id/v1/get-player-data?game_id={mlbb_id}&server_id={server_id}"
+    headers = {"Authorization": f"Bearer {MLBB_API_KEY}"}
+    
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers) as response:
+            if response.status != 200:
+                return None  # Handle error
+            data = await response.json()
+            if not data.get('success'):
+                return None
+            player_data = data.get('data', {})
+            return parse_rank(player_data)
+
+@bot.event
+async def on_ready():
+    print(f"Logged in as {bot.user}")
+    update_ranks.start()  # Start the background task
+
+@bot.tree.command(name="verify", description="Verify your MLBB account and get rank role")
+@app_commands.describe(mlbb_id="Your MLBB User ID", server_id="Your MLBB Server ID")
+async def verify(interaction: discord.Interaction, mlbb_id: str, server_id: str):
+    user_id = interaction.user.id
+    guild = interaction.guild
+    
+    # Store in DB
+    users.update_one(
+        {"discord_id": user_id},
+        {"$set": {
+            "mlbb_id": mlbb_id,
+            "server_id": server_id,
+            "verification_date": datetime.utcnow()
+        }},
+        upsert=True
+    )
+    
+    # Fetch and assign role
+    rank = await fetch_mlbb_rank(mlbb_id, server_id)
+    if not rank:
+        await interaction.response.send_message("Failed to fetch rank. Check IDs or API status.", ephemeral=True)
+        return
+    
+    member = guild.get_member(user_id)
+    if not member:
+        await interaction.response.send_message("Member not found.", ephemeral=True)
+        return
+    
+    # Remove all existing rank roles
+    roles_to_remove = [guild.get_role(role_id) for role_id in RANK_ROLE_IDS if guild.get_role(role_id) in member.roles]
+    if roles_to_remove:
+        await member.remove_roles(*roles_to_remove)
+    
+    # Add new role
+    role_id = ROLE_MAP.get(rank)
+    if role_id:
+        role = guild.get_role(role_id)
+        if role:
+            await member.add_roles(role)
+    
+    # Update current rank in DB
+    users.update_one({"discord_id": user_id}, {"$set": {"current_rank": rank}})
+    
+    await interaction.response.send_message(f"Verified! Your rank is {rank}. Role assigned.", ephemeral=True)
+
+@tasks.loop(hours=1)  # Check every hour for "24/7" monitoring (adjust as needed to avoid API rate limits)
+async def update_ranks():
+    guild = bot.get_guild(GUILD_ID)
+    if not guild:
+        print("Guild not found.")
+        return
+    
+    for user_data in users.find():
+        discord_id = user_data.get("discord_id")
+        mlbb_id = user_data.get("mlbb_id")
+        server_id = user_data.get("server_id")
+        old_rank = user_data.get("current_rank")
+        
+        if not (mlbb_id and server_id):
+            continue
+        
+        new_rank = await fetch_mlbb_rank(mlbb_id, server_id)
+        if not new_rank or new_rank == old_rank:
+            continue
+        
+        member = guild.get_member(discord_id)
+        if not member:
+            continue
+        
+        # Remove all existing rank roles
+        roles_to_remove = [guild.get_role(role_id) for role_id in RANK_ROLE_IDS if guild.get_role(role_id) in member.roles]
+        if roles_to_remove:
+            await member.remove_roles(*roles_to_remove)
+        
+        # Add new role
+        role_id = ROLE_MAP.get(new_rank)
+        if role_id:
+            role = guild.get_role(role_id)
+            if role:
+                await member.add_roles(role)
+        
+        # Update DB
+        users.update_one({"discord_id": discord_id}, {"$set": {"current_rank": new_rank}})
+        
+        # Notify user
+        await member.send(f"Your MLBB rank has changed from {old_rank} to {new_rank}! Your Discord role has been updated.")
+
+@update_ranks.before_loop
+async def before_update_ranks():
+    await bot.wait_until_ready()
+
+# Run the bot
+bot.run(DISCORD_TOKEN)
+
+https://api.apify.com/v2/actor-builds/EZXMDeUyNilKFdoPR?token=apify_api_MHhshk8AunUraJJEaAAMQwCv0n32A41EKjPR
+
+
+const { MongoClient, ServerApiVersion } = require('mongodb');
+const uri = "mongodb+srv://ipeorgofficial_db_user:<db_password>@ipeorgdb.tbi80zu.mongodb.net/?appName=IPEORGDB";
+
+// Create a MongoClient with a MongoClientOptions object to set the Stable API version
+const client = new MongoClient(uri, {
+  serverApi: {
+    version: ServerApiVersion.v1,
+    strict: true,
+    deprecationErrors: true,
+  }
+});
+
+async function run() {
+  try {
+    // Connect the client to the server	(optional starting in v4.7)
+    await client.connect();
+    // Send a ping to confirm a successful connection
+    await client.db("admin").command({ ping: 1 });
+    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+  } finally {
+    // Ensures that the client will close when you finish/error
+    await client.close();
+  }
+}
+run().catch(console.dir);
+
+
+const http = require('https');
+
+const options = {
+	method: 'GET',
+	hostname: 'true-id-mobile-legends.p.rapidapi.com',
+	port: null,
+	path: '/razepedia.my.id/api/trueid_ml.php?userid=553832456&zoneid=8215',
+	headers: {
+		'x-rapidapi-key': '7e4f2302c7msh373614dc4522466p1997a7jsn882c482e0564',
+		'x-rapidapi-host': 'true-id-mobile-legends.p.rapidapi.com'
+	}
+};
+
+const req = http.request(options, function (res) {
+	const chunks = [];
+
+	res.on('data', function (chunk) {
+		chunks.push(chunk);
+	});
+
+	res.on('end', function () {
+		const body = Buffer.concat(chunks);
+		console.log(body.toString());
+	});
+});
+
+req.end();
+
+const http = require('https');
+
+const options = {
+	method: 'GET',
+	hostname: 'id-game-checker.p.rapidapi.com',
+	port: null,
+	path: '/mobile-legends/1393323764/15748',
+	headers: {
+		'x-rapidapi-key': '7e4f2302c7msh373614dc4522466p1997a7jsn882c482e0564',
+		'x-rapidapi-host': 'id-game-checker.p.rapidapi.com'
+	}
+};
+
+const req = http.request(options, function (res) {
+	const chunks = [];
+
+	res.on('data', function (chunk) {
+		chunks.push(chunk);
+	});
+
+	res.on('end', function () {
+		const body = Buffer.concat(chunks);
+		console.log(body.toString());
+	});
+});
+
+req.end();
+const http = require('https');
+
+const options = {
+	method: 'GET',
+	hostname: 'check-id-game.p.rapidapi.com',
+	port: null,
+	path: '/api/rapid_api/cek_game_ml/838384475/12322',
+	headers: {
+		'x-rapidapi-key': '7e4f2302c7msh373614dc4522466p1997a7jsn882c482e0564',
+		'x-rapidapi-host': 'check-id-game.p.rapidapi.com'
+	}
+};
+
+const req = http.request(options, function (res) {
+	const chunks = [];
+
+	res.on('data', function (chunk) {
+		chunks.push(chunk);
+	});
+
+	res.on('end', function () {
+		const body = Buffer.concat(chunks);
+		console.log(body.toString());
+	});
+});
+
+req.end();
+
+Set environment variables for tokens/keys. Ensure the bot has "Manage Roles" permission and is above the roles in the hierarchy.
+DB: Uses MongoDB to store user data. Add error handling as needed.
+Frequency: Checks every hour to simulate "24/7" monitoring without overloading the API. Adjust @tasks.loop(hours=1) if needed.
+Sub-Tiers: For Mythic, assigns "Mythical Glory" role if stars >=50. Update parsing logic if API fields differ.

@@ -5,6 +5,22 @@ import { createServer } from "http";
 import session from "express-session";
 import { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, REST, Routes } from 'discord.js';
 import { validasi } from "./lib/validasi";
+import {
+  performFraudCheck,
+  logVerificationAttempt,
+  flagSuspiciousActivity,
+  registerDuplicateGameId,
+  updateRateLimitLog,
+  hashIp,
+} from "./lib/fraudDetection";
+import {
+  fetchMLBBRank,
+  parseRank,
+  updateUserRank,
+  ROLE_MAP,
+  RANK_ROLE_IDS,
+} from "./lib/rankManagement";
+import { startRankCheckTask } from "./lib/backgroundTasks";
 
 const app = express();
 const httpServer = createServer(app);
@@ -62,6 +78,8 @@ async function startDiscordBot() {
     client.once('clientReady', async () => {
         console.log(`✅ [Discord Bot] Logged in as ${client.user?.tag}`);
         await registerCommands();
+        // Start background rank checking task
+        startRankCheckTask(client);
     });
 
     client.on('interactionCreate', async interaction => {
@@ -108,6 +126,7 @@ async function startDiscordBot() {
                 
                 const gameId = interaction.fields.getTextInputValue('gameIdInput');
                 const serverId = interaction.fields.getTextInputValue('serverInput');
+                const guildId = interaction.guildId || '';
 
                 await interaction.deferReply({ flags: ['Ephemeral'] });
 
@@ -123,11 +142,9 @@ async function startDiscordBot() {
                     const playerData = await validasi(gameId, serverId);
                     console.log(`📊 [Discord Bot] Player data:`, playerData);
 
-                    // Extract player name from possible field names
+                    // Extract player info
                     const playerName = playerData['username'] || playerData['in-game-nickname'] || playerData['player-name'] || 'Unknown';
-                    // Extract level - try multiple field name variations
                     let playerLevel = playerData['level'] || playerData['user-level'] || playerData['player-level'] || '';
-                    // If level is still empty, check for numeric values in playerData
                     if (!playerLevel) {
                       for (const [key, value] of Object.entries(playerData)) {
                         if (key.includes('level') && value && /^\d+$/.test(value)) {
@@ -139,11 +156,113 @@ async function startDiscordBot() {
                     playerLevel = playerLevel || 'Not Available';
                     const playerRegion = playerData['region'] || playerData['zone'] || serverId;
 
+                    // ANTI-FRAUD CHECK
+                    const ipHash = hashIp(interaction.ip || 'unknown');
+                    const fraudCheck = await performFraudCheck(
+                      interaction.user.id,
+                      guildId,
+                      gameId,
+                      serverId,
+                      playerData,
+                      ipHash
+                    );
+
+                    // Log verification attempt
+                    await logVerificationAttempt(
+                      interaction.user.id,
+                      guildId,
+                      gameId,
+                      serverId,
+                      playerData,
+                      fraudCheck.isFraudulent ? 'suspicious' : 'success',
+                      ipHash,
+                      interaction.userAgent
+                    );
+
+                    // Update rate limit log
+                    await updateRateLimitLog(interaction.user.id, guildId, fraudCheck.isFraudulent);
+
+                    if (fraudCheck.isFraudulent) {
+                        console.warn(`⚠️ [Discord Bot] FRAUD ALERT: ${fraudCheck.activityType}`);
+                        console.warn(`   Reasons: ${fraudCheck.reasons.join(', ')}`);
+                        console.warn(`   Severity: ${fraudCheck.severity}`);
+
+                        // Flag suspicious activity
+                        await flagSuspiciousActivity(
+                          interaction.user.id,
+                          guildId,
+                          gameId,
+                          fraudCheck.activityType || 'unknown',
+                          fraudCheck.reasons.join('; '),
+                          fraudCheck.severity
+                        );
+
+                        // Register duplicate if applicable
+                        if (fraudCheck.activityType === 'duplicate_gameid') {
+                          await registerDuplicateGameId(gameId, serverId, interaction.user.id, fraudCheck.severity);
+                        }
+
+                        // Alert mod channel if high severity
+                        if (fraudCheck.severity === 'high') {
+                          const guild = interaction.guild;
+                          const adminChannel = guild ? guild.channels.cache.get(BOT_CONFIG.CHANNEL_ADMIN_DASHBOARD_ID) : null;
+
+                          if (adminChannel && adminChannel.isTextBased()) {
+                            const alertEmbed = new EmbedBuilder()
+                              .setTitle('🚨 FRAUD ALERT - High Severity')
+                              .setColor('Red')
+                              .addFields(
+                                { name: 'User', value: `<@${interaction.user.id}>`, inline: true },
+                                { name: 'Discord Tag', value: interaction.user.tag, inline: true },
+                                { name: 'Alert Type', value: fraudCheck.activityType || 'unknown', inline: true },
+                                { name: 'Game ID', value: gameId, inline: true },
+                                { name: 'Server', value: serverId, inline: true },
+                                { name: 'Severity', value: fraudCheck.severity, inline: true },
+                                { name: 'Reasons', value: fraudCheck.reasons.join('\n'), inline: false },
+                                { name: 'Timestamp', value: new Date().toLocaleString(), inline: false }
+                              )
+                              .setFooter({ text: `Manual review recommended` });
+
+                            await adminChannel.send({ embeds: [alertEmbed] });
+                          }
+                        }
+
+                        return await interaction.editReply({
+                          content: `⚠️ **Verification Flagged**\n\nYour verification has been flagged for manual review due to suspicious activity:\n• ${fraudCheck.reasons.join('\n• ')}\n\nOur moderators will review your account shortly.`
+                        });
+                    }
+
+                    // RANK MANAGEMENT: Attempt to fetch MLBB rank
+                    let assignedRank = "Unranked";
+                    let assignedRoleId = "";
+
+                    const rankData = await fetchMLBBRank(gameId, serverId);
+                    if (rankData) {
+                        const { rank, stars, points } = parseRank({ tier: rankData.tier, stars: rankData.stars, points: rankData.points });
+                        assignedRank = rank;
+                        assignedRoleId = ROLE_MAP[rank] || "";
+
+                        // Store rank in database
+                        await updateUserRank(
+                          interaction.user.id,
+                          guildId,
+                          gameId,
+                          serverId,
+                          rank,
+                          stars,
+                          points
+                        );
+
+                        console.log(`⭐ [Discord Bot] Rank determined: ${rank} (${stars} stars)`);
+                    } else {
+                        console.log(`ℹ️  [Discord Bot] Rank data unavailable (API key not configured). User marked as Unranked.`);
+                    }
+
                     console.log(`✅ [Discord Bot] Account verified: ${playerName}`);
 
                     try {
                         await interaction.user.send(
-                            `✅ **Congratulations!**\n\nYour Mobile Legends account **${playerName}** (Level ${playerLevel}, ${playerRegion}) has been verified!\n\nYou now have access to all server channels. Welcome to IPEORG!`
+                            `✅ **Congratulations!**\n\n**Verification Complete**\n\n📱 **Account Details:**\n• Game ID: \`${gameId}\`\n• Server: \`${serverId}\`\n• Nickname: **${playerName}**\n• Level: **${playerLevel}**\n• Region: **${playerRegion}**\n• Rank: **${assignedRank}**\n\nYou now have access to all server channels. Welcome to IPEORG! 🎮`
                         );
                     } catch (e) {
                         console.error('[Discord Bot] Failed to send DM:', e instanceof Error ? e.message : String(e));
@@ -176,13 +295,22 @@ async function startDiscordBot() {
                             const member = await guild.members.fetch(interaction.user.id);
                             await member.roles.add(BOT_CONFIG.ROLE_VERIFIED_ID);
                             console.log(`✅ [Discord Bot] Verified role assigned to ${interaction.user.tag}`);
+
+                            // RANK MANAGEMENT: Add rank role
+                            if (assignedRoleId) {
+                                const rankRole = guild.roles.cache.get(assignedRoleId);
+                                if (rankRole) {
+                                    await member.roles.add(rankRole);
+                                    console.log(`✅ [Discord Bot] Rank role (${assignedRank}) assigned to ${interaction.user.tag}`);
+                                }
+                            }
                         } catch (e) {
                             console.error('[Discord Bot] Failed to assign role:', e instanceof Error ? e.message : String(e));
                         }
                     }
 
                     await interaction.editReply({
-                        content: `✅ **Verification Successful!**\n\nYour Mobile Legends account **${playerName}** has been verified.\n✓ Check your DMs for confirmation\n✓ Verified role has been assigned\n✓ Enjoy full server access!`
+                        content: `✅ **Verification Successful!**\n\nYour Mobile Legends account **${playerName}** has been verified.\n✓ Rank: **${assignedRank}**\n✓ Check your DMs for confirmation\n✓ Rank role and verified role assigned\n✓ Enjoy full server access!`
                     });
 
                 } catch (error) {

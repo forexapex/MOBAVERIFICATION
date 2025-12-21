@@ -1,0 +1,46 @@
+Automated Role Management - Multiple Tiers, Auto-Demote on Level Drops
+Sync MLBB ranks with Discord roles.
+
+Implementation:
+Define tiers (e.g., "Warrior", "Mythic") mapping to MLBB ranks.
+In Mobile Legends: Bang Bang (MLBB), players climb through seven primary rank tiers. Progress is generally tracked using a star system, except for the highest tiers, which use a points-based star system. 
+The ranks from lowest to highest for 2025 are as follows:
+1. Warrior
+The starting rank for all new players. 
+Divisions: Warrior III to Warrior I.
+Requirement: 3 stars to advance each division.
+Note: You do not lose stars upon defeat in this tier. 
+2. Elite
+Divisions: Elite IV to Elite I.
+Requirement: 3 to 4 stars per division. 
+3. Master
+Divisions: Master IV to Master I.
+Requirement: 4 stars per division. 
+4. Grandmaster
+Divisions: Grandmaster V to Grandmaster I.
+Requirement: 5 stars per division. 
+5. Epic
+Widely considered the "gatekeeper" rank where competitive play intensifies. 
+Divisions: Epic V to Epic I.
+Requirement: 5 stars per division.
+Feature: Unlocks Draft Pick mode, where each team can ban heroes. 
+6. Legend
+Divisions: Legend V to Legend I.
+Requirement: 5 stars per division. 
+7. Mythic & Beyond
+Once you reach Mythic, you no longer have numerical divisions (like V or I). Instead, you accumulate stars to reach prestigious sub-tiers. 
+Mythic: The entry level of the highest tier (0–24 stars).
+Mythical Honor: Reached at 25 stars.
+Mythical Glory: Reached at 50 stars.
+Mythical Immortal: The highest possible rank, reached at 100 stars
+On verify or periodic check (cron job), assign/remove roles based on current rank .
+Auto-demote: Background task checks DB every 24h; if rank drops, remove role and notify.
+1452232717339983914  for Warrior
+1452232985712787497 Elite
+1452233028209348660  Master
+1452233083431555115  Grandmaster
+1452233113609441310  Epic
+1452233142986342420  Legend
+1452233677839794228   Mythic
+1452233176570269719    Mythical Glory
+after verify and when bot give role cross check profile of user and find in which rank user is at and give role make it cross check bot 24/7 and update rank role as per it

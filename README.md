@@ -315,6 +315,104 @@ created_at  TIMESTAMP
    - Reward system for participation
    - Points-based achievements
 
+## ⚠️ Known Issues & Limitations
+
+### 1. **"Level Not Available" in Verification Response**
+**What's Happening**: Player level shows as "Not Available" when users verify.
+
+**Why**: The moogold.com validation API (used for verification) only returns:
+- Game ID
+- Server ID
+- In-game Nickname
+- Country
+
+It does **NOT** provide player level, rank, or any game statistics.
+
+**Is This Normal?** Yes. This is a limitation of the validation API itself, not our bot.
+
+**Current Workaround**: Players see "Level Not Available" but verification still succeeds. The bot still assigns roles based on MLBB rank (if RapidAPI key is configured).
+
+### 2. **"Rank: Unranked" - No Rank API Available**
+**What's Happening**: All verified users show as "Unranked" because rank data cannot be fetched.
+
+**Why**: ⚠️ **This is not a bot bug - Moonton does NOT provide a public API for player rank data**
+
+**The Reality:**
+- Moonton has NO official API that returns player rank/tier/stars
+- All RapidAPI MLBB endpoints (id-game-checker, True ID, etc.) only return:
+  - Account ID
+  - Username
+  - Region/Country
+  - Shop events
+- **They do NOT return rank, tier, or stars data**
+- This is intentional by Moonton (they don't expose competitive rank data publicly)
+
+**Is This Normal?** Yes. No MLBB bot can currently fetch real player ranks from any public API.
+
+**Workarounds** (Not yet implemented):
+1. **Manual Rank Entry** - Users tell the bot their rank with a command
+2. **Screenshot OCR** - Bot parses screenshots to detect rank visually
+3. **Manual Admin Assignment** - Moderators verify and assign ranks manually
+
+**For Now:**
+- Verification works perfectly without rank
+- All users show as "Unranked" (this is expected)
+- Server admins can manually verify players are who they claim
+
+### 3. **Discord Role Not Being Assigned**
+**What's Happening**: Verification succeeds but user doesn't get the rank role.
+
+**Why**: Usually one of these reasons:
+
+**Reason A: Bot Missing Permissions**
+- Bot must have "Manage Roles" permission
+- Fix: Check Discord Server Settings → Roles → Bot role has permission enabled
+
+**Reason B: Bot Role Below Rank Roles**
+- Bot role must be ABOVE all rank roles in hierarchy
+- Fix: Drag bot role above rank roles in Discord role settings
+
+**Reason C: Wrong Role IDs in Code**
+- Role IDs in code don't match server
+- Fix: Check `server/lib/rankManagement.ts` has correct role IDs
+
+**Check Your Bot Permissions:**
+```
+Discord Server → Settings → Roles → [Bot Role]
+✅ Manage Roles
+✅ Read Messages/View Channels
+✅ Send Messages
+✅ Read Message History
+```
+
+## 🔧 Troubleshooting Guide
+
+### Problem: "⚠️ Could not fetch rank, defaulting to Warrior"
+**Solution**: Set `RAPIDAPI_KEY` environment variable with a valid API key
+
+### Problem: "[Rank Management] Error fetching rank: Request failed with status code 401"
+**Solution**: Check your RapidAPI key is valid and not expired. Regenerate if needed.
+
+### Problem: "[Discord Bot] Failed to assign role: Missing Permissions"
+**Solution**: Bot needs "Manage Roles" permission and must be above the rank role in hierarchy
+
+### Problem: User level shows "Not Available"
+**Solution**: This is expected - the validation API doesn't provide level data. This is not a bug.
+
+### Problem: Background rank check says "Rank check completed" but no updates happen
+**Solution**: Likely because RAPIDAPI_KEY is not set. Add it to enable rank fetching.
+
+## 📋 Quick Checklist
+
+- [ ] Bot has Discord Token set
+- [ ] Bot has "Manage Roles" permission in server
+- [ ] Bot role is above all rank roles in role hierarchy
+- [ ] Database is initialized (`npm run db:push`)
+- [ ] Account verification works (users can verify with Game ID + Server ID)
+- [ ] Users receive DM confirmations after verifying
+
+**Note on Ranks:** Player rank features cannot be implemented because Moonton does not provide a public rank API. See "Known Issues" section above.
+
 ## 🤝 Contributing
 
 Contributions are welcome! Please follow these guidelines:
@@ -349,8 +447,8 @@ This project is not affiliated with or endorsed by Moonton Games or Mobile Legen
 
 ---
 
-**Last Updated**: December 21, 2024
+**Last Updated**: December 21, 2025
 
-**Version**: 1.1.0
+**Version**: 1.2.0 - Updated with known issues documentation and troubleshooting guide
 
 For the latest updates and news, follow us on Discord and GitHub!

@@ -174,6 +174,81 @@ export async function registerRoutes(
     }
   });
 
+  // Get current user profile
+  app.get("/api/user/profile", async (req, res) => {
+    const accessToken = (req.session as any).accessToken;
+    if (!accessToken) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+
+    try {
+      const response = await axios.get(`${DISCORD_API}/users/@me`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      res.json(response.data);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch user profile" });
+    }
+  });
+
+  // Get user rank info (requires userId from query param)
+  app.get("/api/user/rank", async (req, res) => {
+    const accessToken = (req.session as any).accessToken;
+    if (!accessToken) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+
+    try {
+      // Get user profile first to get their ID
+      const userResponse = await axios.get(`${DISCORD_API}/users/@me`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      const userId = userResponse.data.id;
+
+      // Get user rank from database
+      const { db } = await import("./db");
+      const { userRanks } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+
+      const rankRecord = await db
+        .select()
+        .from(userRanks)
+        .where(eq(userRanks.userId, userId));
+
+      if (rankRecord.length === 0) {
+        return res.json({
+          verified: false,
+          rank: null,
+          message: "User not verified yet",
+        });
+      }
+
+      const record = rankRecord[0];
+      res.json({
+        verified: true,
+        userId: record.userId,
+        mlbbId: record.mlbbId,
+        serverId: record.serverId,
+        currentRank: record.currentRank,
+        previousRank: record.previousRank,
+        stars: record.stars,
+        points: record.points,
+        roleId: record.roleId,
+        lastChecked: record.lastChecked,
+        rankChangedAt: record.rankChangedAt,
+        createdAt: record.createdAt,
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch rank" });
+    }
+  });
+
   // Logout
   app.post("/api/logout", (req, res) => {
     (req.session as any).accessToken = null;
