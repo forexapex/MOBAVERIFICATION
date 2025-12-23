@@ -3,7 +3,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import session from "express-session";
-import { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, REST, Routes } from 'discord.js';
+import { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, REST, Routes } from 'discord.js';
 import { validasi } from "./lib/validasi";
 import {
   performFraudCheck,
@@ -41,6 +41,164 @@ const BOT_CONFIG = {
     ROLE_VERIFIED_ID: '1451490702348259409',
 };
 
+// Command cooldown tracking (in memory, resets on bot restart)
+const cooldowns = new Map<string, number>();
+const COOLDOWN_DURATION = 60 * 1000; // 1 minute in milliseconds
+
+// Available character images - 135+ MLBB characters
+const CHARACTER_IMAGES = [
+    'attached_assets/aamon.png',
+    'attached_assets/akai.png',
+    'attached_assets/aldous.png',
+    'attached_assets/alice.png',
+    'attached_assets/alpha.png',
+    'attached_assets/alucard.png',
+    'attached_assets/angela.png',
+    'attached_assets/argus.png',
+    'attached_assets/arlot.png',
+    'attached_assets/atlas.png',
+    'attached_assets/aulus.png',
+    'attached_assets/aurora.png',
+    'attached_assets/badang.png',
+    'attached_assets/balmond.png',
+    'attached_assets/bane.png',
+    'attached_assets/barats.png',
+    'attached_assets/baxia.png',
+    'attached_assets/beatrix.png',
+    'attached_assets/beleric.png',
+    'attached_assets/benedetta.png',
+    'attached_assets/brody.png',
+    'attached_assets/bruno.png',
+    'attached_assets/carmila.png',
+    'attached_assets/cecilion.png',
+    'attached_assets/chang_e.png',
+    'attached_assets/chip.png',
+    'attached_assets/chou.png',
+    'attached_assets/cici.png',
+    'attached_assets/claude.png',
+    'attached_assets/clint.png',
+    'attached_assets/cyclops.png',
+    'attached_assets/diggie.png',
+    'attached_assets/dyroth.png',
+    'attached_assets/edith.png',
+    'attached_assets/esmeralda.png',
+    'attached_assets/estes.png',
+    'attached_assets/eudora.png',
+    'attached_assets/fanny.png',
+    'attached_assets/faramis.png',
+    'attached_assets/floryn.png',
+    'attached_assets/franco.png',
+    'attached_assets/fredrin.png',
+    'attached_assets/freya.png',
+    'attached_assets/gatotkaca.png',
+    'attached_assets/gloo.png',
+    'attached_assets/gord.png',
+    'attached_assets/granger.png',
+    'attached_assets/grock.png',
+    'attached_assets/guinevere.png',
+    'attached_assets/gusion.png',
+    'attached_assets/hanabi.png',
+    'attached_assets/hanzo.png',
+    'attached_assets/harith.png',
+    'attached_assets/harley.png',
+    'attached_assets/hayabusa.png',
+    'attached_assets/helcurt.png',
+    'attached_assets/hilda.png',
+    'attached_assets/hylos.png',
+    'attached_assets/idle.png',
+    'attached_assets/irithel.png',
+    'attached_assets/ixia.png',
+    'attached_assets/jawhead.png',
+    'attached_assets/johnson.png',
+    'attached_assets/joy.png',
+    'attached_assets/julian.png',
+    'attached_assets/kadita.png',
+    'attached_assets/kagura.png',
+    'attached_assets/kaja.png',
+    'attached_assets/kalea.png',
+    'attached_assets/karina.png',
+    'attached_assets/karrie.png',
+    'attached_assets/khaleed.png',
+    'attached_assets/khufra.png',
+    'attached_assets/kimmy.png',
+    'attached_assets/lancelot.png',
+    'attached_assets/lapulapu.png',
+    'attached_assets/layla.png',
+    'attached_assets/leomord.png',
+    'attached_assets/lesley.png',
+    'attached_assets/ling.png',
+    'attached_assets/lolita.png',
+    'attached_assets/lukas.png',
+    'attached_assets/lunox.png',
+    'attached_assets/luoyi.png',
+    'attached_assets/lylia.png',
+    'attached_assets/martis.png',
+    'attached_assets/masha.png',
+    'attached_assets/mathilda.png',
+    'attached_assets/melissa.png',
+    'attached_assets/minotour.png',
+    'attached_assets/minsitthar.png',
+    'attached_assets/miya.png',
+    'attached_assets/moskov.png',
+    'attached_assets/nana.png',
+    'attached_assets/natalia.png',
+    'attached_assets/natan.png',
+    'attached_assets/nolan.png',
+    'attached_assets/novaria.png',
+    'attached_assets/obsidia.png',
+    'attached_assets/odette.png',
+    'attached_assets/paquito.png',
+    'attached_assets/pharsa.png',
+    'attached_assets/phoveus.png',
+    'attached_assets/popolandkupa.png',
+    'attached_assets/rafaela.png',
+    'attached_assets/roger.png',
+    'attached_assets/ruby.png',
+    'attached_assets/saber.png',
+    'attached_assets/selena.png',
+    'attached_assets/silvanna.png',
+    'attached_assets/sun.png',
+    'attached_assets/suyou.png',
+    'attached_assets/terizla.png',
+    'attached_assets/thamuz.png',
+    'attached_assets/tigreal.png',
+    'attached_assets/uranus.png',
+    'attached_assets/valentina.png',
+    'attached_assets/vale.png',
+    'attached_assets/valir.png',
+    'attached_assets/vexana.png',
+    'attached_assets/wanwan.png',
+    'attached_assets/xavier.png',
+    'attached_assets/xborg.png',
+    'attached_assets/yin.png',
+    'attached_assets/yisunshin.png',
+    'attached_assets/yuzhong.png',
+    'attached_assets/yve.png',
+    'attached_assets/zetian.png',
+    'attached_assets/zhask.png',
+    'attached_assets/zhuxin.png',
+    'attached_assets/zilong.png',
+    'attached_assets/IPEORGBADGE_1766133873456.png',
+    'attached_assets/IPEORGBADGE_1766134329796.png',
+    'attached_assets/image_1766216788907.png',
+    'attached_assets/image_1766217135488.png'
+];
+
+function getCooldownKey(userId: string, command: string): string {
+    return `${userId}-${command}`;
+}
+
+function getRemainingCooldown(cooldownKey: string): number | null {
+    const lastUsed = cooldowns.get(cooldownKey);
+    if (!lastUsed) return null;
+    
+    const remaining = COOLDOWN_DURATION - (Date.now() - lastUsed);
+    return remaining > 0 ? remaining : null;
+}
+
+function getRandomCharacterImage(): string {
+    return CHARACTER_IMAGES[Math.floor(Math.random() * CHARACTER_IMAGES.length)];
+}
 
 async function startDiscordBot() {
     if (!BOT_CONFIG.BOT_TOKEN) {
@@ -48,7 +206,11 @@ async function startDiscordBot() {
         return;
     }
 
-    const commands = [{ name: 'verify', description: 'Verify your Mobile Legends account' }];
+    const commands = [
+        { name: 'verify', description: 'Verify your Mobile Legends account' },
+        { name: 'rank', description: 'Set your MLBB rank manually' },
+        { name: 'profile', description: 'View your verification status' }
+    ];
     const rest = new REST({ version: '10' }).setToken(BOT_CONFIG.BOT_TOKEN);
 
     const client = new Client({
@@ -84,13 +246,198 @@ async function startDiscordBot() {
 
     client.on('interactionCreate', async interaction => {
         try {
+            if (interaction.isChatInputCommand() && interaction.commandName === 'rank') {
+                console.log(`📊 [Discord Bot] /rank command from ${interaction.user.tag}`);
+                
+                const ranks = ['Warrior', 'Elite', 'Master', 'Grandmaster', 'Epic', 'Legend', 'Mythic', 'Mythical Glory'];
+                const selectMenu = new ActionRowBuilder<StringSelectMenuBuilder>()
+                    .addComponents(
+                        new StringSelectMenuBuilder()
+                            .setCustomId('rankSelect')
+                            .setPlaceholder('Select your MLBB rank...')
+                            .addOptions(
+                                ranks.map(rank => ({
+                                    label: rank,
+                                    value: rank,
+                                    emoji: rank === 'Mythical Glory' ? '👑' : '⭐'
+                                }))
+                            )
+                    );
+
+                await interaction.reply({
+                    content: '📱 **Select Your MLBB Rank**\n\n*Since Moonton doesn\'t provide a public rank API, please select your current rank:*',
+                    components: [selectMenu],
+                    flags: ['Ephemeral']
+                });
+            }
+
+            if (interaction.isStringSelectMenu() && interaction.customId === 'rankSelect') {
+                const selectedRank = interaction.values[0];
+                const guildId = interaction.guildId || BOT_CONFIG.GUILD_ID;
+                
+                try {
+                    // Update rank in database
+                    await updateUserRank(
+                        interaction.user.id,
+                        guildId,
+                        'manual-submission',
+                        '0',
+                        selectedRank,
+                        0,
+                        0
+                    );
+
+                    // Get rank role ID
+                    const rankRoleId = ROLE_MAP[selectedRank];
+                    if (rankRoleId && interaction.guild) {
+                        const member = await interaction.guild.members.fetch(interaction.user.id);
+                        
+                        // Remove old rank roles
+                        const rolesToRemove = RANK_ROLE_IDS
+                            .map((roleId) => interaction.guild!.roles.cache.get(roleId))
+                            .filter((role): role is NonNullable<typeof role> => role !== undefined && member.roles.cache.has(role.id));
+
+                        if (rolesToRemove.length > 0) {
+                            await member.roles.remove(rolesToRemove);
+                        }
+
+                        // Add new rank role
+                        const rankRole = interaction.guild.roles.cache.get(rankRoleId);
+                        if (rankRole) {
+                            await member.roles.add(rankRole);
+                            console.log(`✅ [Discord Bot] Rank role (${selectedRank}) assigned to ${interaction.user.tag}`);
+                        }
+                    }
+
+                    const rankEmbed = new EmbedBuilder()
+                        .setTitle('✅ Rank Updated!')
+                        .setColor('Green')
+                        .setDescription(`Your rank has been set to **${selectedRank}**`)
+                        .addFields(
+                            { name: '🎮 Rank', value: selectedRank, inline: true },
+                            { name: '✨ Role', value: 'Discord role assigned', inline: true }
+                        )
+                        .setFooter({ text: 'IPEORG MLBB Bot - Great play! 🏆' });
+                    
+                    await interaction.reply({
+                        embeds: [rankEmbed],
+                        flags: ['Ephemeral']
+                    });
+                } catch (error) {
+                    console.error('[Discord Bot] Error updating rank:', error instanceof Error ? error.message : String(error));
+                    
+                    const errorEmbed = new EmbedBuilder()
+                        .setTitle('❌ Rank Update Failed')
+                        .setColor('Red')
+                        .setDescription('Failed to update your rank.')
+                        .addFields(
+                            { name: 'Error', value: error instanceof Error ? error.message : 'Unknown error', inline: false }
+                        )
+                        .setFooter({ text: 'IPEORG MLBB Bot' });
+                    
+                    await interaction.reply({
+                        embeds: [errorEmbed],
+                        flags: ['Ephemeral']
+                    });
+                }
+            }
+
+            if (interaction.isChatInputCommand() && interaction.commandName === 'profile') {
+                console.log(`📊 [Discord Bot] /profile command from ${interaction.user.tag}`);
+                
+                try {
+                    const userRecord = await db.select().from(userRanks).where(eq(userRanks.userId, interaction.user.id));
+                    
+                    if (userRecord.length === 0) {
+                        const embed = new EmbedBuilder()
+                            .setTitle('📱 Your MLBB Profile')
+                            .setColor('Yellow')
+                            .setDescription('You haven\'t verified your account yet.')
+                            .addFields(
+                                { name: 'Status', value: '❌ Not Verified', inline: true },
+                                { name: 'Action', value: 'Use `/verify` command to get started', inline: false }
+                            )
+                            .setFooter({ text: 'IPEORG MLBB Bot' })
+                            .setTimestamp();
+                        
+                        return await interaction.reply({
+                            embeds: [embed],
+                            flags: ['Ephemeral']
+                        });
+                    }
+                    
+                    const profile = userRecord[0];
+                    const verifiedDate = new Date(profile.createdAt || 0).toLocaleDateString();
+                    const characterImage = getRandomCharacterImage();
+                    
+                    const embed = new EmbedBuilder()
+                        .setTitle('ACCOUNT DETAILS')
+                        .setColor('#00D4FF')
+                        .setThumbnail(`attachment://${characterImage.split('/').pop()}`)
+                        .addFields(
+                            { name: 'Game ID', value: profile.mlbbId, inline: false },
+                            { name: 'Server', value: profile.serverId, inline: false },
+                            { name: 'In Game Name', value: 'Verified Player', inline: false },
+                            { name: 'Region', value: profile.serverId, inline: false },
+                            { name: '\u200B', value: '\u200B' },
+                            { name: '⭐ Rank', value: profile.currentRank || 'Unranked', inline: true },
+                            { name: '📊 Stars', value: `${profile.stars || 0}`, inline: true },
+                            { name: '📅 Verified Date', value: verifiedDate, inline: true }
+                        )
+                        .setFooter({ text: 'IPEORG MLBB Bot' })
+                        .setTimestamp();
+                    
+                    await interaction.reply({
+                        embeds: [embed],
+                        files: [characterImage],
+                        flags: ['Ephemeral']
+                    });
+                } catch (error) {
+                    console.error('[Discord Bot] Error fetching profile:', error instanceof Error ? error.message : String(error));
+                    const errorEmbed = new EmbedBuilder()
+                        .setTitle('❌ Error')
+                        .setColor('Red')
+                        .setDescription('Failed to load your profile. Please try again.')
+                        .setFooter({ text: 'IPEORG MLBB Bot' });
+                    
+                    await interaction.reply({
+                        embeds: [errorEmbed],
+                        flags: ['Ephemeral']
+                    });
+                }
+            }
+
             if (interaction.isChatInputCommand() && interaction.commandName === 'verify') {
                 console.log(`📝 [Discord Bot] /verify command from ${interaction.user.tag}`);
                 
-                const isAllowedChannel = interaction.channelId === BOT_CONFIG.CHANNEL_VERIFY_ID || !interaction.guild;
-                if (!isAllowedChannel) {
+                // Check cooldown
+                const cooldownKey = getCooldownKey(interaction.user.id, 'verify');
+                const remainingCooldown = getRemainingCooldown(cooldownKey);
+                
+                if (remainingCooldown) {
+                    const minutes = Math.ceil(remainingCooldown / 60000);
+                    const cooldownEmbed = new EmbedBuilder()
+                        .setTitle('⏱️ Cooldown Active')
+                        .setColor('Red')
+                        .setDescription(`You can verify again in **${minutes}** minute${minutes > 1 ? 's' : ''}.`)
+                        .setFooter({ text: 'IPEORG MLBB Bot' });
+                    
                     return await interaction.reply({
-                        content: `❌ This command can only be used in <#${BOT_CONFIG.CHANNEL_VERIFY_ID}>`,
+                        embeds: [cooldownEmbed],
+                        flags: ['Ephemeral']
+                    });
+                }
+                
+                const isAllowedChannel = interaction.channelId === BOT_CONFIG.CHANNEL_VERIFY_ID || interaction.channelId === BOT_CONFIG.CHANNEL_ADMIN_DASHBOARD_ID || !interaction.guild;
+                if (!isAllowedChannel) {
+                    const channelEmbed = new EmbedBuilder()
+                        .setTitle('❌ Wrong Channel')
+                        .setColor('Red')
+                        .setDescription(`This command can only be used in <#${BOT_CONFIG.CHANNEL_VERIFY_ID}> or <#${BOT_CONFIG.CHANNEL_ADMIN_DASHBOARD_ID}>`)
+                        .setFooter({ text: 'IPEORG MLBB Bot' });
+                    
+                    return await interaction.reply({
+                        embeds: [channelEmbed],
                         flags: ['Ephemeral']
                     });
                 }
@@ -131,10 +478,33 @@ async function startDiscordBot() {
                 await interaction.deferReply({ flags: ['Ephemeral'] });
 
                 try {
+                    // Set cooldown
+                    const cooldownKey = getCooldownKey(interaction.user.id, 'verify');
+                    cooldowns.set(cooldownKey, Date.now());
+                    
                     // Validate server ID is numeric
                     if (!/^\d+$/.test(serverId)) {
+                        const errorEmbed = new EmbedBuilder()
+                            .setTitle('❌ Invalid Server ID')
+                            .setColor('Red')
+                            .setDescription('Server ID must be numeric (e.g., 20345). Please try again.')
+                            .setFooter({ text: 'IPEORG MLBB Bot' });
+                        
                         return await interaction.editReply({
-                            content: `❌ Invalid Server ID. Please enter a numeric server ID (e.g., 20345).`
+                            embeds: [errorEmbed]
+                        });
+                    }
+                    
+                    // Validate Game ID format
+                    if (!/^\d{9,10}$/.test(gameId)) {
+                        const errorEmbed = new EmbedBuilder()
+                            .setTitle('❌ Invalid Game ID')
+                            .setColor('Red')
+                            .setDescription('Game ID must be 9-10 digits (e.g., 123456789). Please try again.')
+                            .setFooter({ text: 'IPEORG MLBB Bot' });
+                        
+                        return await interaction.editReply({
+                            embeds: [errorEmbed]
                         });
                     }
 
@@ -227,8 +597,18 @@ async function startDiscordBot() {
                           }
                         }
 
+                        const flaggedEmbed = new EmbedBuilder()
+                            .setTitle('⚠️ Verification Flagged')
+                            .setColor('Orange')
+                            .setDescription('Your verification has been flagged for manual review.')
+                            .addFields(
+                                { name: 'Reason', value: fraudCheck.reasons.join('\n'), inline: false },
+                                { name: 'Next Steps', value: 'Our moderators will review your account shortly and contact you.', inline: false }
+                            )
+                            .setFooter({ text: 'IPEORG MLBB Bot' });
+                        
                         return await interaction.editReply({
-                          content: `⚠️ **Verification Flagged**\n\nYour verification has been flagged for manual review due to suspicious activity:\n• ${fraudCheck.reasons.join('\n• ')}\n\nOur moderators will review your account shortly.`
+                            embeds: [flaggedEmbed]
                         });
                     }
 
@@ -261,9 +641,33 @@ async function startDiscordBot() {
                     console.log(`✅ [Discord Bot] Account verified: ${playerName}`);
 
                     try {
-                        await interaction.user.send(
-                            `✅ **Congratulations!**\n\n**Verification Complete**\n\n📱 **Account Details:**\n• Game ID: \`${gameId}\`\n• Server: \`${serverId}\`\n• Nickname: **${playerName}**\n• Level: **${playerLevel}**\n• Region: **${playerRegion}**\n• Rank: **${assignedRank}**\n\nYou now have access to all server channels. Welcome to IPEORG! 🎮`
-                        );
+                        const dmCharacterImage = getRandomCharacterImage();
+                        const dmCharacterFileName = dmCharacterImage.split('/').pop() || 'character.png';
+                        
+                        const dmEmbed = new EmbedBuilder()
+                            .setTitle('ACCOUNT DETAILS')
+                            .setColor('#00D4FF')
+                            .setDescription('✅ **Congratulations! Verification Complete**')
+                            .setThumbnail(`attachment://${dmCharacterFileName}`)
+                            .addFields(
+                                { name: 'Game ID', value: gameId, inline: false },
+                                { name: 'Server', value: serverId, inline: false },
+                                { name: 'In Game Name', value: playerName, inline: false },
+                                { name: 'Region', value: playerRegion, inline: false },
+                                { name: '\u200B', value: '\u200B' },
+                                { name: '⭐ Rank', value: assignedRank, inline: true },
+                                { name: '📊 Level', value: playerLevel, inline: true },
+                                { name: '✨ Status', value: 'Verified', inline: true },
+                                { name: '\u200B', value: '\u200B' },
+                                { name: '🎮 Server Access', value: 'You now have full access to all server channels. Welcome to IPEORG!', inline: false }
+                            )
+                            .setFooter({ text: 'IPEORG MLBB Bot' })
+                            .setTimestamp();
+                        
+                        await interaction.user.send({
+                            embeds: [dmEmbed],
+                            files: [dmCharacterImage]
+                        });
                     } catch (e) {
                         console.error('[Discord Bot] Failed to send DM:', e instanceof Error ? e.message : String(e));
                     }
@@ -309,14 +713,47 @@ async function startDiscordBot() {
                         }
                     }
 
+                    const characterImage = getRandomCharacterImage();
+                    const characterFileName = characterImage.split('/').pop() || 'character.png';
+                    
+                    const successEmbed = new EmbedBuilder()
+                        .setTitle('ACCOUNT DETAILS')
+                        .setColor('#00D4FF')
+                        .setDescription('✅ **Verification Successful!**')
+                        .setThumbnail(`attachment://${characterFileName}`)
+                        .addFields(
+                            { name: 'Game ID', value: gameId, inline: false },
+                            { name: 'Server', value: serverId, inline: false },
+                            { name: 'In Game Name', value: playerName, inline: false },
+                            { name: 'Region', value: playerRegion, inline: false },
+                            { name: '\u200B', value: '\u200B' },
+                            { name: '⭐ Rank', value: assignedRank, inline: true },
+                            { name: '✅ Status', value: 'Verified', inline: true },
+                            { name: '📱 Access', value: 'Full Server Access', inline: true }
+                        )
+                        .setFooter({ text: 'IPEORG MLBB Bot' })
+                        .setTimestamp();
+                    
                     await interaction.editReply({
-                        content: `✅ **Verification Successful!**\n\nYour Mobile Legends account **${playerName}** has been verified.\n✓ Rank: **${assignedRank}**\n✓ Check your DMs for confirmation\n✓ Rank role and verified role assigned\n✓ Enjoy full server access!`
+                        embeds: [successEmbed],
+                        files: [characterImage]
                     });
 
                 } catch (error) {
                     console.error(`❌ [Discord Bot] Verification failed:`, error instanceof Error ? error.message : String(error));
+                    
+                    const errorEmbed = new EmbedBuilder()
+                        .setTitle('❌ Verification Failed')
+                        .setColor('Red')
+                        .setDescription('Something went wrong during verification.')
+                        .addFields(
+                            { name: 'Error', value: error instanceof Error ? error.message : 'Unknown error. Please contact support.', inline: false },
+                            { name: 'Troubleshooting', value: '• Check your Game ID is correct (9-10 digits)\n• Check your Server ID is numeric\n• Try again in a few moments', inline: false }
+                        )
+                        .setFooter({ text: 'IPEORG MLBB Bot' });
+                    
                     await interaction.editReply({
-                        content: `❌ **Verification Failed**\n\n${error instanceof Error ? error.message : String(error)}\n\nPlease make sure your Game ID and Server are correct.`
+                        embeds: [errorEmbed]
                     });
                 }
             }

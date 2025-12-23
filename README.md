@@ -89,7 +89,7 @@ The application will start on port 5000:
 ## 📝 Commands
 
 ### `/verify`
-Initiates the Mobile Legends account verification process.
+Initiates the Mobile Legends account verification process (requires Game ID + Server ID).
 
 **Usage**: Type `/verify` in the configured verification channel or DM
 
@@ -105,10 +105,40 @@ Initiates the Mobile Legends account verification process.
 ```
 ✅ Congratulations!
 
-Your Mobile Legends account **PlayerName** (Level 45, 20345) has been verified!
+Verification Complete
 
-You now have access to all server channels. Welcome to IPEORG!
+📱 Account Details:
+• Game ID: `123456789`
+• Server: `20345`
+• Nickname: PlayerName
+• Level: Not Available
+• Region: SEA
+• Rank: Unranked
+
+You now have access to all server channels. Welcome to IPEORG! 🎮
 ```
+
+### `/rank`
+Manually set your MLBB rank (since Moonton doesn't provide a public rank API).
+
+**Usage**: Type `/rank` anywhere in the server
+
+**How it works**:
+- Select your current MLBB rank from dropdown
+- Discord role is automatically assigned to match your rank
+- Updates your rank in the system
+
+**Available Ranks**:
+- Warrior
+- Elite
+- Master
+- Grandmaster
+- Epic
+- Legend
+- Mythic
+- Mythical Glory
+
+**Why manual?** Since Moonton doesn't provide a public API for player ranks, users submit their own rank to get the correct Discord role. Mods can verify accuracy.
 
 ## 🏗️ Project Structure
 

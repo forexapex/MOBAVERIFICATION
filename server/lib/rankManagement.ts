@@ -57,15 +57,10 @@ export function parseRank(playerData: Record<string, any>): { rank: string; star
 
 /**
  * Fetch MLBB player rank from API
- * 
- * ⚠️ IMPORTANT: Moonton does NOT provide a public API for player rank data
- * All RapidAPI MLBB endpoints only return account info/shop data, NOT rank/tier/stars
- * This function returns null since no working rank API exists
- * 
- * TODO: Manual rank input or screenshot-based detection could be implemented as alternative
+ * Note: Returns null since no public API provides rank data.
+ * Users set rank manually via /rank command instead.
  */
 export async function fetchMLBBRank(mlbbId: string, serverId: string): Promise<PlayerRankData | null> {
-  console.log("[Rank Management] Player rank data is not available from any public MLBB API. Moonton does not provide rank/tier/stars endpoints.");
   return null;
 }
 
