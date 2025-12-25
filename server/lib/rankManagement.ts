@@ -115,7 +115,8 @@ export async function updateUserRank(
   rank: string,
   stars: number,
   points: number,
-  division?: string
+  division?: string,
+  playerName?: string
 ): Promise<void> {
   const existing = await db.select().from(userRanks).where(eq(userRanks.userId, userId));
 
@@ -129,6 +130,7 @@ export async function updateUserRank(
     await db
       .update(userRanks)
       .set({
+        playerName: playerName || existing[0].playerName, // Keep existing if not provided
         currentRank: rank,
         division: division || null,
         previousRank: rankChanged ? previousRank : undefined,
@@ -146,6 +148,7 @@ export async function updateUserRank(
       guildId,
       mlbbId,
       serverId,
+      playerName,
       currentRank: rank,
       division: division || null,
       stars,

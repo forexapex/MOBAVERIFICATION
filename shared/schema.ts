@@ -107,6 +107,7 @@ export const userRanks = pgTable("user_ranks", {
   guildId: text("guild_id").notNull(),
   mlbbId: text("mlbb_id").notNull(),
   serverId: text("server_id").notNull(),
+  playerName: text("player_name"), // In-game player name from API
   currentRank: text("current_rank"), // Warrior, Elite, Master, etc.
   division: text("division"), // Optional division/tier (e.g., "III", "25-49 stars")
   previousRank: text("previous_rank"),

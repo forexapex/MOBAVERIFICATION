@@ -61,9 +61,18 @@ Preferred communication style: Simple, everyday language.
 
 ### Environment Variables Required
 - `DATABASE_URL`: PostgreSQL connection string
+- `DISCORD_BOT_TOKEN`: Discord bot authentication token (stored as secret)
 - `DISCORD_CLIENT_ID`: Discord application client ID
 - `DISCORD_CLIENT_SECRET`: Discord OAuth client secret
 - `DISCORD_REDIRECT_URI`: OAuth callback URL
+
+### Discord Bot Token Setup
+**Important Note**: The DISCORD_BOT_TOKEN secret has been added to the project but will only be loaded by the application after:
+1. Restarting the application with the secret configured in Replit Secrets
+2. In development: The secret is injected when the Node process starts
+3. In production: Secrets are automatically available as environment variables
+
+The bot will automatically detect the token and start once it's available.
 
 ### Development Tools
 - Replit-specific Vite plugins for development (`@replit/vite-plugin-runtime-error-modal`, `@replit/vite-plugin-cartographer`)

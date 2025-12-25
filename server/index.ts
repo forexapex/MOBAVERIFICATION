@@ -208,7 +208,10 @@ function getRandomCharacterImage(): string {
 }
 
 async function startDiscordBot() {
-    if (!BOT_CONFIG.BOT_TOKEN) {
+    // Read token fresh from environment (in case it was loaded after server start)
+    const token = process.env.DISCORD_BOT_TOKEN || BOT_CONFIG.BOT_TOKEN;
+    console.log('[Discord Bot] Token check:', token ? 'Token found ✓' : 'No token (will skip)');
+    if (!token) {
         console.warn('⚠️ [Discord Bot] Bot token not configured. Skipping bot startup.');
         return;
     }
@@ -220,7 +223,7 @@ async function startDiscordBot() {
         { name: 'help', description: 'Get help - View all available bot commands' },
         { name: 'stats', description: 'View your verification statistics and account details' }
     ];
-    const rest = new REST({ version: '10' }).setToken(BOT_CONFIG.BOT_TOKEN);
+    const rest = new REST({ version: '10' }).setToken(token);
 
     const client = new Client({
         intents: [
@@ -256,7 +259,8 @@ async function startDiscordBot() {
                 rank,
                 0,
                 0,
-                division
+                division,
+                profile.playerName // Preserve existing player name from database
             );
 
             const rankRoleId = ROLE_MAP[rank];
@@ -291,14 +295,14 @@ async function startDiscordBot() {
             const successEmbed = new EmbedBuilder()
                 .setTitle('✅ Verification Complete!')
                 .setColor('Green')
-                .setDescription('Your account has been verified and roles have been assigned.')
+                .setDescription(`Welcome ${profile.playerName || 'player'}! Your Mobile Legends account has been verified.`)
                 .addFields(
                     { name: '🎮 Game ID', value: profile.mlbbId, inline: true },
                     { name: '🌐 Server', value: profile.serverId, inline: true },
                     { name: '⭐ Rank', value: rankDisplay, inline: true },
                     { name: '🎊 Access', value: 'You now have full server access!', inline: false }
                 )
-                .setFooter({ text: 'IPEORG MLBB Bot' })
+                .setFooter({ text: 'Verified automatically via IPEORG' })
                 .setTimestamp();
 
             await interaction.editReply({ embeds: [successEmbed] });
@@ -404,7 +408,8 @@ async function startDiscordBot() {
                         const divisionPrompt = new EmbedBuilder()
                             .setTitle(`⭐ Select ${selectedRank} Division`)
                             .setColor('#FFA500')
-                            .setDescription(`Choose your current division for ${selectedRank}`);
+                            .setDescription(`Choose your current division for ${selectedRank}`)
+                            .setFooter({ text: 'Verified automatically via IPEORG' });
 
                         return await interaction.editReply({
                             embeds: [divisionPrompt],
@@ -445,7 +450,7 @@ async function startDiscordBot() {
                         .setTitle('✅ Rank Updated!')
                         .setColor('Green')
                         .setDescription(`Your rank has been set to **${selectedRank}**`)
-                        .setFooter({ text: 'IPEORG MLBB Bot - Great play! 🏆' });
+                        .setFooter({ text: 'Verified automatically via IPEORG' });
                     
                     await interaction.editReply({
                         embeds: [rankEmbed]
@@ -485,7 +490,8 @@ async function startDiscordBot() {
                         currentRank,
                         0,
                         0,
-                        selectedDivision
+                        selectedDivision,
+                        userRecord[0]?.playerName ?? undefined // Preserve stored player name
                     );
 
                     const rankRoleId = ROLE_MAP[currentRank];
@@ -509,7 +515,7 @@ async function startDiscordBot() {
                         .setTitle('✅ Division Set!')
                         .setColor('Green')
                         .setDescription(`${currentRank} **${selectedDivision}** assigned!`)
-                        .setFooter({ text: 'IPEORG MLBB Bot' });
+                        .setFooter({ text: 'Verified automatically via IPEORG' });
                     
                     await interaction.editReply({
                         embeds: [embed]
@@ -577,7 +583,8 @@ async function startDiscordBot() {
                         const divisionPrompt = new EmbedBuilder()
                             .setTitle(`📊 Select ${selectedRank} Division`)
                             .setColor('#FFA500')
-                            .setDescription(`Choose your division within ${selectedRank}`);
+                            .setDescription(`Choose your division within ${selectedRank}`)
+                            .setFooter({ text: 'Verified automatically via IPEORG' });
 
                         return await interaction.editReply({
                             embeds: [divisionPrompt],
@@ -642,7 +649,7 @@ async function startDiscordBot() {
                                 { name: 'Status', value: '❌ Not Verified', inline: true },
                                 { name: 'Action', value: 'Use `/verify` command to get started', inline: false }
                             )
-                            .setFooter({ text: 'IPEORG MLBB Bot' })
+                            .setFooter({ text: 'Verified automatically via IPEORG' })
                             .setTimestamp();
                         
                         return await interaction.reply({
@@ -652,21 +659,36 @@ async function startDiscordBot() {
                     }
                     
                     const profile = userRecord[0];
-                    const characterImagePath = getRandomCharacterImage();
+                    const rankDisplay = profile.division ? `${profile.currentRank} ${profile.division}` : (profile.currentRank || 'Unranked');
                     
-                    // Generate the account details card image
+                    // Show profile text embed first
+                    const profileEmbed = new EmbedBuilder()
+                        .setTitle(`📱 ${profile.playerName || 'MLBB Profile'}`)
+                        .setColor('#00D4FF')
+                        .addFields(
+                            { name: '🎮 Game ID', value: profile.mlbbId, inline: true },
+                            { name: '🌐 Server', value: profile.serverId, inline: true },
+                            { name: '⭐ Rank', value: rankDisplay, inline: true },
+                            { name: '✅ Status', value: 'Verified', inline: true }
+                        )
+                        .setFooter({ text: 'Verified automatically via IPEORG' })
+                        .setTimestamp();
+                    
+                    // Generate the account details card image for visual display
+                    const characterImagePath = getRandomCharacterImage();
                     const cardImage = await generateAccountDetailsCard(characterImagePath, {
                         gameId: profile.mlbbId,
                         server: profile.serverId,
-                        gameName: 'Verified Player',
+                        gameName: profile.playerName || 'Verified Player',
                         region: profile.serverId,
                         rank: profile.currentRank || 'Unranked',
                         level: 'Available',
                         status: 'Verified'
                     });
                     
-                    // Send as image attachment
+                    // Send text embed first, then image
                     await interaction.reply({
+                        embeds: [profileEmbed],
                         files: [{
                             attachment: cardImage,
                             name: 'account-details.png'
@@ -679,7 +701,7 @@ async function startDiscordBot() {
                         .setTitle('❌ Error')
                         .setColor('Red')
                         .setDescription('Failed to load your profile. Please try again.')
-                        .setFooter({ text: 'IPEORG MLBB Bot' });
+                        .setFooter({ text: 'Verified automatically via IPEORG' });
                     
                     await interaction.reply({
                         embeds: [errorEmbed],
@@ -788,7 +810,7 @@ async function startDiscordBot() {
                         .setTitle('⏱️ Cooldown Active')
                         .setColor('Red')
                         .setDescription(`You can verify again in **${minutes}** minute${minutes > 1 ? 's' : ''}.`)
-                        .setFooter({ text: 'IPEORG MLBB Bot' });
+                        .setFooter({ text: 'Verified automatically via IPEORG' });
                     
                     return await interaction.reply({
                         embeds: [cooldownEmbed],
@@ -802,7 +824,7 @@ async function startDiscordBot() {
                         .setTitle('❌ Wrong Channel')
                         .setColor('Red')
                         .setDescription(`This command can only be used in <#${BOT_CONFIG.CHANNEL_VERIFY_ID}> or <#${BOT_CONFIG.CHANNEL_ADMIN_DASHBOARD_ID}>`)
-                        .setFooter({ text: 'IPEORG MLBB Bot' });
+                        .setFooter({ text: 'Verified automatically via IPEORG' });
                     
                     return await interaction.reply({
                         embeds: [channelEmbed],
@@ -816,14 +838,14 @@ async function startDiscordBot() {
 
                 const gameIdInput = new TextInputBuilder()
                     .setCustomId('gameIdInput')
-                    .setLabel('Game ID (8-10 digits)')
+                    .setLabel('🎮 Game ID (8-10 digits)')
                     .setStyle(TextInputStyle.Short)
                     .setRequired(true)
                     .setPlaceholder('e.g., 123456789');
 
                 const serverInput = new TextInputBuilder()
                     .setCustomId('serverInput')
-                    .setLabel('Server ID')
+                    .setLabel('🌐 Server ID')
                     .setStyle(TextInputStyle.Short)
                     .setRequired(true)
                     .setPlaceholder('e.g., 20345');
@@ -856,7 +878,7 @@ async function startDiscordBot() {
                             .setTitle('❌ Invalid Server ID')
                             .setColor('Red')
                             .setDescription('Server ID must be numeric (e.g., 20345). Please try again.')
-                            .setFooter({ text: 'IPEORG MLBB Bot' });
+                            .setFooter({ text: 'Verified automatically via IPEORG' });
                         
                         return await interaction.editReply({
                             embeds: [errorEmbed]
@@ -869,156 +891,20 @@ async function startDiscordBot() {
                             .setTitle('❌ Invalid Game ID')
                             .setColor('Red')
                             .setDescription('Game ID must be 8-10 digits (e.g., 123456789). Please try again.')
-                            .setFooter({ text: 'IPEORG MLBB Bot' });
+                            .setFooter({ text: 'Verified automatically via IPEORG' });
                         
                         return await interaction.editReply({
                             embeds: [errorEmbed]
                         });
                     }
 
-                    console.log(`🔍 [Discord Bot] Verifying Game ID: ${gameId}, Server ID: ${serverId}`);
-                    const playerData = await validasi(gameId, serverId);
-                    console.log(`📊 [Discord Bot] Player data:`, playerData);
-
-                    // Extract player info
-                    const playerName = playerData['username'] || playerData['in-game-nickname'] || playerData['player-name'] || 'Unknown';
-                    let playerLevel = playerData['level'] || playerData['user-level'] || playerData['player-level'] || '';
-                    if (!playerLevel) {
-                      for (const [key, value] of Object.entries(playerData)) {
-                        if (key.includes('level') && value && /^\d+$/.test(value)) {
-                          playerLevel = value;
-                          break;
-                        }
-                      }
-                    }
-                    playerLevel = playerLevel || 'Not Available';
-                    const playerRegion = playerData['region'] || playerData['zone'] || serverId;
-
-                    // ANTI-FRAUD CHECK
-                    const ipHash = hashIp('discord-bot');
-                    const fraudCheck = await performFraudCheck(
-                      interaction.user.id,
-                      guildId,
-                      gameId,
-                      serverId,
-                      playerData,
-                      ipHash
-                    );
-
-                    // Log verification attempt
-                    await logVerificationAttempt(
-                      interaction.user.id,
-                      guildId,
-                      gameId,
-                      serverId,
-                      playerData,
-                      fraudCheck.isFraudulent ? 'suspicious' : 'success',
-                      ipHash,
-                      'discord-bot'
-                    );
-
-                    // Update rate limit log
-                    await updateRateLimitLog(interaction.user.id, guildId, fraudCheck.isFraudulent);
-
-                    if (fraudCheck.isFraudulent) {
-                        console.warn(`⚠️ [Discord Bot] FRAUD ALERT: ${fraudCheck.activityType}`);
-                        console.warn(`   Reasons: ${fraudCheck.reasons.join(', ')}`);
-                        console.warn(`   Severity: ${fraudCheck.severity}`);
-
-                        // Flag suspicious activity
-                        await flagSuspiciousActivity(
-                          interaction.user.id,
-                          guildId,
-                          gameId,
-                          fraudCheck.activityType || 'unknown',
-                          fraudCheck.reasons.join('; '),
-                          fraudCheck.severity
-                        );
-
-                        // Register duplicate if applicable
-                        if (fraudCheck.activityType === 'duplicate_gameid') {
-                          await registerDuplicateGameId(gameId, serverId, interaction.user.id, fraudCheck.severity);
-                        }
-
-                        // Alert mod channel if high severity
-                        if (fraudCheck.severity === 'high') {
-                          const guild = interaction.guild;
-                          const adminChannel = guild ? guild.channels.cache.get(BOT_CONFIG.CHANNEL_ADMIN_DASHBOARD_ID) : null;
-
-                          if (adminChannel && adminChannel.isTextBased()) {
-                            const alertEmbed = new EmbedBuilder()
-                              .setTitle('🚨 FRAUD ALERT - High Severity')
-                              .setColor('Red')
-                              .addFields(
-                                { name: 'User', value: `<@${interaction.user.id}>`, inline: true },
-                                { name: 'Discord Tag', value: interaction.user.tag, inline: true },
-                                { name: 'Alert Type', value: fraudCheck.activityType || 'unknown', inline: true },
-                                { name: 'Game ID', value: gameId, inline: true },
-                                { name: 'Server', value: serverId, inline: true },
-                                { name: 'Severity', value: fraudCheck.severity, inline: true },
-                                { name: 'Reasons', value: fraudCheck.reasons.join('\n'), inline: false },
-                                { name: 'Timestamp', value: new Date().toLocaleString(), inline: false }
-                              )
-                              .setFooter({ text: `Manual review recommended` });
-
-                            await adminChannel.send({ embeds: [alertEmbed] });
-                          }
-                        }
-
-                        const flaggedEmbed = new EmbedBuilder()
-                            .setTitle('⚠️ Verification Flagged')
-                            .setColor('Orange')
-                            .setDescription('Your verification has been flagged for manual review.')
-                            .addFields(
-                                { name: 'Reason', value: fraudCheck.reasons.join('\n'), inline: false },
-                                { name: 'Next Steps', value: 'Our moderators will review your account shortly and contact you.', inline: false }
-                            )
-                            .setFooter({ text: 'IPEORG MLBB Bot' });
-                        
-                        return await interaction.editReply({
-                            embeds: [flaggedEmbed]
-                        });
-                    }
-
-                    console.log(`✅ [Discord Bot] Account verified: ${playerName}`);
-
-                    // IMPORTANT: Create user record in database immediately after verification
-                    // This prevents "session expired" errors when user selects rank
-                    try {
-                        await updateUserRank(
-                            interaction.user.id,
-                            guildId,
-                            gameId,
-                            serverId,
-                            'Warrior', // Default rank until user selects
-                            0,
-                            0,
-                            undefined
-                        );
-                    } catch (dbError) {
-                        console.error('Error creating user record:', dbError);
-                        // Continue anyway - user can still select rank
-                    }
-
-                    // Assign verified role (with error handling)
-                    try {
-                        if (interaction.guild && BOT_CONFIG.ROLE_VERIFIED_ID) {
-                            const member = await interaction.guild.members.fetch(interaction.user.id);
-                            await member.roles.add(BOT_CONFIG.ROLE_VERIFIED_ID);
-                            console.log(`✅ [Discord Bot] Verified role assigned to ${interaction.user.tag}`);
-                        }
-                    } catch (roleError) {
-                        console.warn(`⚠️ [Discord Bot] Could not assign verified role:`, roleError instanceof Error ? roleError.message : String(roleError));
-                        // Continue anyway - user can still select rank
-                    }
-
-                    // Show rank selection menu (optional)
+                    // Show rank selection BEFORE API call - collect all info first
                     const ranks = Object.keys(RANK_DIVISIONS);
                     const rankSelectMenu = new ActionRowBuilder<StringSelectMenuBuilder>()
                         .addComponents(
                             new StringSelectMenuBuilder()
-                                .setCustomId(`rankSelect_${interaction.user.id}`)
-                                .setPlaceholder('Select your MLBB rank (optional)...')
+                                .setCustomId(`rankSelect_${interaction.user.id}_${gameId}_${serverId}`)
+                                .setPlaceholder('Select your MLBB rank...')
                                 .addOptions(
                                     ranks.map(rank => ({
                                         label: rank,
@@ -1028,18 +914,20 @@ async function startDiscordBot() {
                                 )
                         );
 
-                    const rankPrompt = new EmbedBuilder()
-                        .setTitle('⭐ Select Your MLBB Rank (Optional)')
-                        .setColor('#FFA500')
-                        .setDescription('Your account has been verified! Optionally select your current MLBB rank. You can always update it later with /rank.')
+                    const selectionPrompt = new EmbedBuilder()
+                        .setTitle('📋 Complete Your Verification')
+                        .setColor('#00D4FF')
+                        .setDescription('Your Game ID and Server have been validated. Now select your rank and division.')
                         .addFields(
-                            { name: 'Game ID', value: gameId, inline: true },
-                            { name: 'Player Name', value: playerName, inline: true }
+                            { name: '🎮 Game ID', value: gameId, inline: true },
+                            { name: '🌐 Server', value: serverId, inline: true },
+                            { name: '⭐ Rank', value: 'Select below...', inline: false },
+                            { name: '📊 Division', value: 'Will appear after rank selection', inline: false }
                         )
-                        .setFooter({ text: 'IPEORG MLBB Bot' });
+                        .setFooter({ text: 'Verified automatically via IPEORG' });
 
                     await interaction.editReply({
-                        embeds: [rankPrompt],
+                        embeds: [selectionPrompt],
                         components: [rankSelectMenu]
                     });
 
@@ -1078,8 +966,8 @@ async function startDiscordBot() {
     });
 
     try {
-        await client.login(BOT_CONFIG.BOT_TOKEN);
-        console.log('🚀 [Discord Bot] Bot starting...');
+        await client.login(token);
+        console.log('🚀 [Discord Bot] Bot started successfully!');
     } catch (error) {
         console.error('❌ [Discord Bot] Login failed:', error);
     }
