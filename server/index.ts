@@ -295,12 +295,11 @@ async function startDiscordBot() {
             const successEmbed = new EmbedBuilder()
                 .setTitle('✅ Verification Complete!')
                 .setColor('Green')
-                .setDescription(`Welcome ${profile.playerName || 'player'}! Your Mobile Legends account has been verified.`)
                 .addFields(
-                    { name: '🎮 Game ID', value: profile.mlbbId, inline: true },
-                    { name: '🌐 Server', value: profile.serverId, inline: true },
-                    { name: '⭐ Rank', value: rankDisplay, inline: true },
-                    { name: '🎊 Access', value: 'You now have full server access!', inline: false }
+                    { name: '🎮 Game ID', value: profile.mlbbId, inline: false },
+                    { name: '🌐 Server', value: profile.serverId, inline: false },
+                    { name: '👤 Player Name', value: profile.playerName || 'PRIMOIXI', inline: false },
+                    { name: '⭐ Rank Selected', value: rankDisplay, inline: false }
                 )
                 .setFooter({ text: 'Verified automatically via IPEORG' })
                 .setTimestamp();
@@ -544,6 +543,21 @@ async function startDiscordBot() {
                 try {
                     const userRecord = await db.select().from(userRanks).where(eq(userRanks.userId, interaction.user.id));
 
+                    // Handle "All" rank option
+                    if (selectedRank === 'All') {
+                        const profile = userRecord[0];
+                        if (!profile) {
+                            const errorEmbed = new EmbedBuilder()
+                                .setTitle('❌ Session Expired')
+                                .setColor('Red')
+                                .setDescription('Your verification session has expired. Please run /verify again.')
+                                .setFooter({ text: 'Verified automatically via IPEORG' });
+                            return await interaction.editReply({ embeds: [errorEmbed] });
+                        }
+                        await completeVerification(interaction, profile, 'All', undefined, guildId);
+                        return;
+                    }
+
                     if (userRecord.length === 0) {
                         const errorEmbed = new EmbedBuilder()
                             .setTitle('❌ Session Expired')
@@ -555,6 +569,19 @@ async function startDiscordBot() {
                     }
 
                     const profile = userRecord[0];
+
+                    // Update the record with the selected rank first, so it's available for division selection
+                    await updateUserRank(
+                        interaction.user.id,
+                        guildId || profile.guildId,
+                        profile.mlbbId,
+                        profile.serverId,
+                        selectedRank,
+                        0,
+                        0,
+                        undefined,
+                        profile.playerName || 'PRIMOIXI'
+                    );
 
                     // If rank has multiple divisions, show division picker
                     if (divisions.length > 1) {
@@ -898,8 +925,21 @@ async function startDiscordBot() {
                         });
                     }
 
+                    // Create/Update initial record to prevent session expiration
+                    await updateUserRank(
+                        interaction.user.id,
+                        guildId,
+                        gameId,
+                        serverId,
+                        'Warrior', // Default initial rank
+                        0,
+                        0,
+                        undefined,
+                        'PRIMOIXI' // Default player name as requested
+                    );
+
                     // Show rank selection BEFORE API call - collect all info first
-                    const ranks = Object.keys(RANK_DIVISIONS);
+                    const ranks = [...Object.keys(RANK_DIVISIONS), 'All'];
                     const rankSelectMenu = new ActionRowBuilder<StringSelectMenuBuilder>()
                         .addComponents(
                             new StringSelectMenuBuilder()
