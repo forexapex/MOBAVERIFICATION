@@ -3,7 +3,27 @@ import { userRanks } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import axios from "axios";
 
-// Role mapping based on user-provided Discord role IDs
+// Rank structure with divisions
+export interface RankDivision {
+  name: string;
+  divisions: string[];
+}
+
+// Complete 10-rank system with divisions
+export const RANK_DIVISIONS: Record<string, RankDivision> = {
+  "Warrior": { name: "Warrior", divisions: ["III", "II", "I"] },
+  "Elite": { name: "Elite", divisions: ["III", "II", "I"] },
+  "Master": { name: "Master", divisions: ["IV", "III", "II", "I"] },
+  "Grandmaster": { name: "Grandmaster", divisions: ["V", "IV", "III", "II", "I"] },
+  "Epic": { name: "Epic", divisions: ["V", "IV", "III", "II", "I"] },
+  "Legend": { name: "Legend", divisions: ["V", "IV", "III", "II", "I"] },
+  "Mythic": { name: "Mythic", divisions: ["Base Mythic (0-24 stars)"] },
+  "Mythical Honor": { name: "Mythical Honor", divisions: ["25-49 stars"] },
+  "Mythical Glory": { name: "Mythical Glory", divisions: ["50-99 stars"] },
+  "Mythical Immortal": { name: "Mythical Immortal", divisions: ["100+ stars"] },
+};
+
+// Role mapping with all 10 ranks
 export const ROLE_MAP: Record<string, string> = {
   "Warrior": "1452232717339983914",
   "Elite": "1452232985712787497",
@@ -12,7 +32,23 @@ export const ROLE_MAP: Record<string, string> = {
   "Epic": "1452233113609441310",
   "Legend": "1452233142986342420",
   "Mythic": "1452233677839794228",
+  "Mythical Honor": "1452988440340861180",
   "Mythical Glory": "1452233176570269719",
+  "Mythical Immortal": "1452987922285596853",
+};
+
+// Discord emoji IDs for each rank
+export const RANK_EMOJIS: Record<string, string> = {
+  "Warrior": "<:Warrior:1452990245011460226>",
+  "Elite": "<:Elite:1452990207677694164>",
+  "Master": "<:Master:1452990272920096809>",
+  "Grandmaster": "<:Grandmaster:1452990299872690216>",
+  "Epic": "<:Epic:1452990342206062774>",
+  "Legend": "<:Legend:1452990366394617867>",
+  "Mythic": "<:Mythic:1452990402113175562>",
+  "Mythical Honor": "<:Mythical_Honor:1452990429376020591>",
+  "Mythical Glory": "<:Mythical_Glory:1452990449412477080>",
+  "Mythical Immortal": "<:Mythical_Immortal:1452990476494831706>",
 };
 
 export const RANK_ROLE_IDS = Object.values(ROLE_MAP);
@@ -46,8 +82,12 @@ export function parseRank(playerData: Record<string, any>): { rank: string; star
     return { rank: "Legend", stars, points };
   } else if (tier.includes("mythic")) {
     // Mythic sub-tiers based on stars
-    if (stars >= 50) {
+    if (stars >= 100) {
+      return { rank: "Mythical Immortal", stars, points };
+    } else if (stars >= 50) {
       return { rank: "Mythical Glory", stars, points };
+    } else if (stars >= 25) {
+      return { rank: "Mythical Honor", stars, points };
     }
     return { rank: "Mythic", stars, points };
   }
@@ -74,11 +114,13 @@ export async function updateUserRank(
   serverId: string,
   rank: string,
   stars: number,
-  points: number
+  points: number,
+  division?: string
 ): Promise<void> {
   const existing = await db.select().from(userRanks).where(eq(userRanks.userId, userId));
 
   const roleId = ROLE_MAP[rank] || "";
+  const rankDisplay = division ? `${rank} ${division}` : rank;
 
   if (existing.length > 0) {
     const previousRank = existing[0].currentRank;
@@ -88,6 +130,7 @@ export async function updateUserRank(
       .update(userRanks)
       .set({
         currentRank: rank,
+        division: division || null,
         previousRank: rankChanged ? previousRank : undefined,
         stars,
         points,
@@ -104,6 +147,7 @@ export async function updateUserRank(
       mlbbId,
       serverId,
       currentRank: rank,
+      division: division || null,
       stars,
       points,
       roleId,

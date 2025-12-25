@@ -108,6 +108,7 @@ export const userRanks = pgTable("user_ranks", {
   mlbbId: text("mlbb_id").notNull(),
   serverId: text("server_id").notNull(),
   currentRank: text("current_rank"), // Warrior, Elite, Master, etc.
+  division: text("division"), // Optional division/tier (e.g., "III", "25-49 stars")
   previousRank: text("previous_rank"),
   stars: integer("stars").default(0),
   points: integer("points").default(0),
