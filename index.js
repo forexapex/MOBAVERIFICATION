@@ -12,6 +12,8 @@ import {
     ModalBuilder,
     TextInputBuilder,
     TextInputStyle,
+    SelectMenuBuilder,
+    StringSelectMenuBuilder,
 } from "discord.js";
 import axios from "axios";
 
@@ -33,6 +35,20 @@ const CONFIG = {
 
     // MLBB Servers
     MLBB_SERVERS: ["SERVER ID"],
+};
+
+// MLBB Rank Configuration
+const MLBB_RANKS = {
+    Warrior: ["Warrior III", "Warrior II", "Warrior I"],
+    Elite: ["Elite IV", "Elite III", "Elite II", "Elite I"],
+    Master: ["Master IV", "Master III", "Master II", "Master I"],
+    Grandmaster: ["Grandmaster V", "Grandmaster IV", "Grandmaster III", "Grandmaster II", "Grandmaster I"],
+    Epic: ["Epic V", "Epic IV", "Epic III", "Epic II", "Epic I"],
+    Legend: ["Legend V", "Legend IV", "Legend III", "Legend II", "Legend I"],
+    Mythic: ["Mythic (0-24 stars)"],
+    "Mythic Honor": ["Mythic Honor (25 stars)"],
+    "Mythic Glory": ["Mythic Glory (50 stars)"],
+    "Mythic Immortal": ["Mythic Immortal (100 stars)"],
 };
 
 // --- CLIENT SETUP ---
@@ -140,32 +156,51 @@ client.on("interactionCreate", async (interaction) => {
                 });
             }
 
-            // Show modal
+            // Show modal with Game ID, Server, Rank, and Division
+            const gameIdRow = new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                    .setCustomId("gameIdInput")
+                    .setLabel("Game ID (9-10 digits)")
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+            );
+
+            const serverRow = new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                    .setCustomId("serverInput")
+                    .setLabel("Server ID")
+                    .setPlaceholder("e.g., 2083")
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+            );
+
+            const rankRow = new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                    .setCustomId("rankInput")
+                    .setLabel("Rank")
+                    .setPlaceholder("Warrior, Elite, Master, Grandmaster, Epic, Legend, Mythic")
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+            );
+
+            const divisionRow = new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                    .setCustomId("divisionInput")
+                    .setLabel("Division")
+                    .setPlaceholder("e.g., Elite III, Master I, Mythic (50 stars)")
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+            );
+
             const modal = new ModalBuilder()
                 .setCustomId("mlbbVerifyModal")
-                .setTitle("Mobile Legends Verification");
-
-            const gameIdInput = new TextInputBuilder()
-                .setCustomId("gameIdInput")
-                .setLabel("Enter your Game ID (9-10 digits)")
-                .setStyle(TextInputStyle.Short)
-                .setRequired(true);
-
-            const serverInput = new TextInputBuilder()
-                .setCustomId("serverInput")
-                .setLabel("Enter your Server (SEA, GLOBAL, AMERICAS, EUROPE)")
-                .setStyle(TextInputStyle.Short)
-                .setRequired(true);
-
-            modal.addComponents(
-                new ActionRowBuilder().addComponents(gameIdInput),
-                new ActionRowBuilder().addComponents(serverInput),
-            );
+                .setTitle("Mobile Legends Verification")
+                .addComponents(gameIdRow, serverRow, rankRow, divisionRow);
 
             await interaction.showModal(modal);
         }
 
-        // Handle modal submission
+        // Handle modal submission - All fields
         if (
             interaction.isModalSubmit() &&
             interaction.customId === "mlbbVerifyModal"
@@ -175,6 +210,8 @@ client.on("interactionCreate", async (interaction) => {
             const gameId = interaction.fields.getTextInputValue("gameIdInput");
             const serverId =
                 interaction.fields.getTextInputValue("serverInput");
+            const selectedRank = interaction.fields.getTextInputValue("rankInput");
+            const selectedDivision = interaction.fields.getTextInputValue("divisionInput");
 
             // Defer reply as verification might take time
             await interaction.deferReply({ ephemeral: true });
@@ -192,11 +229,42 @@ client.on("interactionCreate", async (interaction) => {
 
                 console.log(`✅ Account verified: ${playerName}`);
 
+                // Create verification embed
+                const verificationEmbed = new EmbedBuilder()
+                    .setTitle("✅ Verification Complete")
+                    .setColor("Green")
+                    .setThumbnail(interaction.user.displayAvatarURL())
+                    .addFields(
+                        {
+                            name: "User",
+                            value: `${interaction.user.tag}`,
+                            inline: true,
+                        },
+                        { name: "Game ID", value: gameId, inline: true },
+                        { name: "Server", value: serverId, inline: true },
+                        {
+                            name: "Player Name",
+                            value: playerName,
+                            inline: true,
+                        },
+                        { name: "Level", value: playerLevel, inline: true },
+                        { name: "Rank", value: selectedDivision, inline: true },
+                        {
+                            name: "Timestamp",
+                            value: new Date().toLocaleString(),
+                            inline: false,
+                        },
+                    )
+                    .setFooter({
+                        text: `Verified automatically via moogold.com`,
+                    });
+
                 // 1. Send DM congratulation
                 try {
-                    await interaction.user.send(
-                        `✅ **Congratulations!**\n\nYour Mobile Legends account **${playerName}** (Level ${playerLevel}, ${playerRegion}) has been verified!\n\nYou now have access to all server channels. Welcome to IPEORG! 🎮`,
-                    );
+                    await interaction.user.send({
+                        embeds: [verificationEmbed],
+                        content: `✅ **Congratulations!**\n\nYour Mobile Legends account **${playerName}** (Level ${playerLevel}, ${playerRegion}) has been verified with rank **${selectedDivision}**!\n\nYou now have access to all server channels. Welcome to IPEORG! 🎮`,
+                    });
                 } catch (e) {
                     console.error("Failed to send DM:", e.message);
                 }
@@ -210,7 +278,7 @@ client.on("interactionCreate", async (interaction) => {
                     : null;
 
                 if (adminChannel) {
-                    const embed = new EmbedBuilder()
+                    const adminEmbed = new EmbedBuilder()
                         .setTitle("✅ New Verification")
                         .setColor("Green")
                         .addFields(
@@ -233,6 +301,11 @@ client.on("interactionCreate", async (interaction) => {
                             },
                             { name: "Level", value: playerLevel, inline: true },
                             {
+                                name: "Rank",
+                                value: selectedDivision,
+                                inline: true,
+                            },
+                            {
                                 name: "Timestamp",
                                 value: new Date().toLocaleString(),
                                 inline: false,
@@ -242,7 +315,7 @@ client.on("interactionCreate", async (interaction) => {
                             text: `Verified automatically via moogold.com`,
                         });
 
-                    await adminChannel.send({ embeds: [embed] });
+                    await adminChannel.send({ embeds: [adminEmbed] });
                     console.log(`📤 Admin transcript sent`);
                 }
 
@@ -261,14 +334,17 @@ client.on("interactionCreate", async (interaction) => {
                     }
                 }
 
-                // 4. Reply to user
-                await interaction.editReply({
-                    content: `✅ **Verification Successful!**\n\nYour Mobile Legends account **${playerName}** has been verified.\n✓ Check your DMs for confirmation\n✓ Verified role has been assigned\n✓ Enjoy full server access! 🎮`,
+                // 4. Reply to user with final message
+                await interaction.followUp({
+                    embeds: [verificationEmbed],
+                    content: `✅ **Verification Successful!**\n\n✓ Player: **${playerName}**\n✓ Rank: **${selectedDivision}**\n✓ Check your DMs for confirmation\n✓ Verified role has been assigned\n✓ Enjoy full server access! 🎮`,
+                    ephemeral: true,
                 });
             } catch (error) {
                 console.error(`❌ Verification failed:`, error.message);
-                await interaction.editReply({
+                await interaction.followUp({
                     content: `❌ **Verification Failed**\n\n${error.message}\n\nPlease make sure your Game ID and Server are correct.`,
+                    ephemeral: true,
                 });
             }
         }

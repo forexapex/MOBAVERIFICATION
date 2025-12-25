@@ -239,13 +239,28 @@ async function startDiscordBot() {
     async function registerCommands() {
         try {
             console.log('🤖 [Discord Bot] Registering commands...');
-            await rest.put(
-                Routes.applicationGuildCommands(BOT_CONFIG.CLIENT_ID, BOT_CONFIG.GUILD_ID),
-                { body: commands },
-            );
-            console.log('✅ [Discord Bot] Commands registered');
+            try {
+                // Try guild-specific commands first
+                await rest.put(
+                    Routes.applicationGuildCommands(BOT_CONFIG.CLIENT_ID, BOT_CONFIG.GUILD_ID),
+                    { body: commands },
+                );
+                console.log('✅ [Discord Bot] Commands registered (guild-specific)');
+            } catch (guildError: any) {
+                // If guild registration fails (permissions), try global commands
+                if (guildError.code === 50001) {
+                    console.log('⚠️ [Discord Bot] Guild command registration failed, trying global commands...');
+                    await rest.put(
+                        Routes.applicationCommands(BOT_CONFIG.CLIENT_ID),
+                        { body: commands },
+                    );
+                    console.log('✅ [Discord Bot] Commands registered (globally)');
+                } else {
+                    throw guildError;
+                }
+            }
         } catch (error) {
-            console.error('❌ [Discord Bot] Error registering commands:', error);
+            console.warn('⚠️ [Discord Bot] Command registration skipped - commands may not be available');
         }
     }
 
@@ -318,6 +333,7 @@ async function startDiscordBot() {
                         { name: 'Discord Tag', value: interaction.user.tag, inline: true },
                         { name: 'Game ID', value: profile.mlbbId, inline: true },
                         { name: 'Server', value: profile.serverId, inline: true },
+                        { name: 'Player Name', value: profile.playerName || 'N/A', inline: true },
                         { name: 'Rank Selected', value: rankDisplay, inline: true },
                         { name: 'Timestamp', value: new Date().toLocaleString(), inline: false }
                     )
@@ -542,21 +558,6 @@ async function startDiscordBot() {
 
                 try {
                     const userRecord = await db.select().from(userRanks).where(eq(userRanks.userId, interaction.user.id));
-
-                    // Handle "All" rank option
-                    if (selectedRank === 'All') {
-                        const profile = userRecord[0];
-                        if (!profile) {
-                            const errorEmbed = new EmbedBuilder()
-                                .setTitle('❌ Session Expired')
-                                .setColor('Red')
-                                .setDescription('Your verification session has expired. Please run /verify again.')
-                                .setFooter({ text: 'Verified automatically via IPEORG' });
-                            return await interaction.editReply({ embeds: [errorEmbed] });
-                        }
-                        await completeVerification(interaction, profile, 'All', undefined, guildId);
-                        return;
-                    }
 
                     if (userRecord.length === 0) {
                         const errorEmbed = new EmbedBuilder()
@@ -939,7 +940,7 @@ async function startDiscordBot() {
                     );
 
                     // Show rank selection BEFORE API call - collect all info first
-                    const ranks = [...Object.keys(RANK_DIVISIONS), 'All'];
+                    const ranks = Object.keys(RANK_DIVISIONS);
                     const rankSelectMenu = new ActionRowBuilder<StringSelectMenuBuilder>()
                         .addComponents(
                             new StringSelectMenuBuilder()
