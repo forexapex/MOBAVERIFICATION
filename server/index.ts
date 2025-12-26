@@ -20,11 +20,12 @@ import {
   fetchMLBBRank,
   parseRank,
   updateUserRank,
+  getUserRank,
   ROLE_MAP,
   RANK_ROLE_IDS,
   RANK_DIVISIONS,
   RANK_EMOJIS,
-} from "./lib/rankManagement";
+} from "./lib/rankManagement.ts";
 import { startRankCheckTask } from "./lib/backgroundTasks";
 import { generateAccountDetailsCard } from "./lib/imageGenerator";
 
@@ -49,146 +50,88 @@ const BOT_CONFIG = {
 
 // Command cooldown tracking (in memory, resets on bot restart)
 const cooldowns = new Map<string, number>();
-const COOLDOWN_DURATION = 60 * 1000; // 1 minute in milliseconds
+const COOLDOWN_DURATION = 3600 * 1000; // 1 hour in milliseconds
 
 // Available character images - 135+ MLBB characters
-const CHARACTER_IMAGES = [
-    'attached_assets/aamon.png',
-    'attached_assets/akai.png',
-    'attached_assets/aldous.png',
-    'attached_assets/alice.png',
-    'attached_assets/alpha.png',
-    'attached_assets/alucard.png',
-    'attached_assets/angela.png',
-    'attached_assets/argus.png',
-    'attached_assets/arlot.png',
-    'attached_assets/atlas.png',
-    'attached_assets/aulus.png',
-    'attached_assets/aurora.png',
-    'attached_assets/badang.png',
-    'attached_assets/balmond.png',
-    'attached_assets/bane.png',
-    'attached_assets/barats.png',
-    'attached_assets/baxia.png',
-    'attached_assets/beatrix.png',
-    'attached_assets/beleric.png',
-    'attached_assets/benedetta.png',
-    'attached_assets/brody.png',
-    'attached_assets/bruno.png',
-    'attached_assets/carmila.png',
-    'attached_assets/cecilion.png',
-    'attached_assets/chang_e.png',
-    'attached_assets/chip.png',
-    'attached_assets/chou.png',
-    'attached_assets/cici.png',
-    'attached_assets/claude.png',
-    'attached_assets/clint.png',
-    'attached_assets/cyclops.png',
-    'attached_assets/diggie.png',
-    'attached_assets/dyroth.png',
-    'attached_assets/edith.png',
-    'attached_assets/esmeralda.png',
-    'attached_assets/estes.png',
-    'attached_assets/eudora.png',
-    'attached_assets/fanny.png',
-    'attached_assets/faramis.png',
-    'attached_assets/floryn.png',
-    'attached_assets/franco.png',
-    'attached_assets/fredrin.png',
-    'attached_assets/freya.png',
-    'attached_assets/gatotkaca.png',
-    'attached_assets/gloo.png',
-    'attached_assets/gord.png',
-    'attached_assets/granger.png',
-    'attached_assets/grock.png',
-    'attached_assets/guinevere.png',
-    'attached_assets/gusion.png',
-    'attached_assets/hanabi.png',
-    'attached_assets/hanzo.png',
-    'attached_assets/harith.png',
-    'attached_assets/harley.png',
-    'attached_assets/hayabusa.png',
-    'attached_assets/helcurt.png',
-    'attached_assets/hilda.png',
-    'attached_assets/hylos.png',
-    'attached_assets/idle.png',
-    'attached_assets/irithel.png',
-    'attached_assets/ixia.png',
-    'attached_assets/jawhead.png',
-    'attached_assets/johnson.png',
-    'attached_assets/joy.png',
-    'attached_assets/julian.png',
-    'attached_assets/kadita.png',
-    'attached_assets/kagura.png',
-    'attached_assets/kaja.png',
-    'attached_assets/kalea.png',
-    'attached_assets/karina.png',
-    'attached_assets/karrie.png',
-    'attached_assets/khaleed.png',
-    'attached_assets/khufra.png',
-    'attached_assets/kimmy.png',
-    'attached_assets/lancelot.png',
-    'attached_assets/lapulapu.png',
-    'attached_assets/layla.png',
-    'attached_assets/leomord.png',
-    'attached_assets/lesley.png',
-    'attached_assets/ling.png',
-    'attached_assets/lolita.png',
-    'attached_assets/lukas.png',
-    'attached_assets/lunox.png',
-    'attached_assets/luoyi.png',
-    'attached_assets/lylia.png',
-    'attached_assets/martis.png',
-    'attached_assets/masha.png',
-    'attached_assets/mathilda.png',
-    'attached_assets/melissa.png',
-    'attached_assets/minotour.png',
-    'attached_assets/minsitthar.png',
-    'attached_assets/miya.png',
-    'attached_assets/moskov.png',
-    'attached_assets/nana.png',
-    'attached_assets/natalia.png',
-    'attached_assets/natan.png',
-    'attached_assets/nolan.png',
-    'attached_assets/novaria.png',
-    'attached_assets/obsidia.png',
-    'attached_assets/odette.png',
-    'attached_assets/paquito.png',
-    'attached_assets/pharsa.png',
-    'attached_assets/phoveus.png',
-    'attached_assets/popolandkupa.png',
-    'attached_assets/rafaela.png',
-    'attached_assets/roger.png',
-    'attached_assets/ruby.png',
-    'attached_assets/saber.png',
-    'attached_assets/selena.png',
-    'attached_assets/silvanna.png',
-    'attached_assets/sun.png',
-    'attached_assets/suyou.png',
-    'attached_assets/terizla.png',
-    'attached_assets/thamuz.png',
-    'attached_assets/tigreal.png',
-    'attached_assets/uranus.png',
-    'attached_assets/valentina.png',
-    'attached_assets/vale.png',
-    'attached_assets/valir.png',
-    'attached_assets/vexana.png',
-    'attached_assets/wanwan.png',
-    'attached_assets/xavier.png',
-    'attached_assets/xborg.png',
-    'attached_assets/yin.png',
-    'attached_assets/yisunshin.png',
-    'attached_assets/yuzhong.png',
-    'attached_assets/yve.png',
-    'attached_assets/zetian.png',
-    'attached_assets/zhask.png',
-    'attached_assets/zhuxin.png',
-    'attached_assets/zilong.png',
-    'attached_assets/IPEORGBADGE_1766133873456.png',
-    'attached_assets/IPEORGBADGE_1766134329796.png',
-    'attached_assets/image_1766216788907.png',
-    'attached_assets/image_1766217135488.png'
-];
+    const CHARACTER_IMAGES = [
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Akai%20Imperial%20Assassin.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Akai5234523.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Aldous%20Blazing%20Force.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Aldous%20Deathh.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Aldous%20King%20Of%20Supremacy.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Aldous%20Red%20Mantle.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Aldous%20The%20Insentient.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Aldouss.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Alice%20Classic.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Alice%20Divine%20Owl.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Alice%20Steam%20Glinder.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Alice%20Wizardy%20Teacher.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Alice4325.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Alucard%20Fiery%20Inferno.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Alucard%20Lightborn%20Striker.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Alucard%20Lone%20Hero.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Alucard%20Romantic%20Fantasy.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Alucard%20Viscount%20.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Alucard3294.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Angela%20Shanghai%20Maiden.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Angela%20Special.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Angela%20Summer%20Vibes.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Angela%20V.E.N.O.M%20Vespid.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Angela3425.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Angela4325.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Argus%20Catastrope.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Argus%20Dark%20Draconic.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Argus%20Light%20of%20Dawn.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Atlas32499.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Auroraa.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Badang%20Fist%20of%20Zen.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Badang%20Ironfists.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Badang%20Leo%20Edited.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Badang%20Leo.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Badang%20Susanoo.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Balmond%20Ghoul\'s%20Fury.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Balmond%20Pointguard.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Balmond%20Savage%20Hunter.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Bane%20Count%20Dracula.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/X%20Borg%20Grafity%20Fashion.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Xborg283458.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Xborg93428.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Yena%20Mercenary.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Yi%20Sun%20Shin.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Yi%20Sun-shin%20%20Roguish%20Ranger.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Yi%20Sun-shin%20Apocalypse%20Agent.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Yi%20Sun-shin%20v3.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Yisun%2023485283.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Yisun48785432.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Yu%20Zhong%20Biohazard%20Edited.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Yu%20Zhong%20Biohazard%20Orj.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Yu%20Zhong.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/YuZhong%20PNG.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Yve%20Edited%204k%20PNG.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Yve%20Orj%204k%20PNG.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Zhask%20Bone%20Flamen.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Zhask%20Cancer.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Zhask%20Crystallized%20Predator.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Zhask%20Extraterretial.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Zhask%20Transparent.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Zhask.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Zilong%20Changbanpo%20Commander.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Zilong%20Class.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Zilong%20Easten%20Warrior.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Zilong%20Elite%20Warrior.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Zilong%20Glorious%20Genera2l.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Zilong%20Glorious%20General.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/Zilong%20Shining%20Knight.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/balmond325432.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/clintpngg.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/de5sewv-f1790c8b-7b7b-4fa4-8891-625f97462e11.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/gusion%20venom%20skin%20transparant.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/harley23544.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/harley324.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/helcurt342525.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/silvana___pure_heroin_png_by_dechunf_de6wpyj-fullview.png',
+        'https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/skin_hayabusa_epic_mlbb_png_by_dechunf_ddrax87-pre.png'
+    ];
 
 function getCooldownKey(userId: string, command: string): string {
     return `${userId}-${command}`;
@@ -218,10 +161,17 @@ async function startDiscordBot() {
 
     const commands = [
         { name: 'verify', description: 'Verify your Mobile Legends account with Game ID and Server ID' },
+        { name: 'unverify', description: 'Remove a user\'s verification data (Admin Only)' },
         { name: 'rank', description: 'Update your MLBB rank - Select from Warrior to Mythical Glory' },
         { name: 'profile', description: 'View your verified MLBB profile and rank details' },
         { name: 'help', description: 'Get help - View all available bot commands' },
-        { name: 'stats', description: 'View your verification statistics and account details' }
+        { name: 'unverify', description: 'Remove verification data (Admin Only)', options: [{
+            name: 'user',
+            type: 6, // USER type
+            description: 'The user to unverify',
+            required: true
+        }] },
+        { name: 'stats', description: 'View your performance statistics with radar chart (Admin Only)' }
     ];
     const rest = new REST({ version: '10' }).setToken(token);
 
@@ -749,7 +699,8 @@ async function startDiscordBot() {
                         { name: '✅ /verify', value: 'Verify your Mobile Legends account\nEnter your Game ID (8-10 digits) and Server ID to get started.', inline: false },
                         { name: '⭐ /rank', value: 'Update your MLBB rank\nSelect your current rank from Warrior to Mythical Glory.', inline: false },
                         { name: '👤 /profile', value: 'View your verified profile\nDisplay your account details, rank, and verification status.', inline: false },
-                        { name: '📊 /stats', value: 'View your statistics\nCheck your verification date, rank history, and account info.', inline: false },
+                        { name: '📊 /stats', value: 'View your performance statistics with radar chart (Admin Only)', inline: false },
+                        { name: '🗑️ /unverify', value: 'Remove a user\'s verification data (Admin Only)\nUsage: `/unverify user:@user`', inline: false },
                         { name: '❓ /help', value: 'Show this help message\nGet information about all available commands.', inline: false },
                         { name: '\u200B', value: '\u200B' },
                         { name: '💡 Tips', value: '• Game ID format: 8-10 digits only\n• Server ID: Required for verification\n• Cooldown: 1 minute between /verify commands\n• Commands work in verification channels only', inline: false }
@@ -763,65 +714,131 @@ async function startDiscordBot() {
                 });
             }
 
+            if (interaction.isChatInputCommand() && interaction.commandName === 'unverify') {
+                console.log(`🗑️ [Discord Bot] /unverify command from ${interaction.user.tag}`);
+                
+                // Admin only restriction
+                if (interaction.memberPermissions && !interaction.memberPermissions.has('Administrator')) {
+                    return await interaction.reply({
+                        content: '❌ This command is restricted to **Administrators** only.',
+                        flags: ['Ephemeral']
+                    });
+                }
+
+                const targetUser = interaction.options.getUser('user');
+                if (!targetUser) {
+                    return await interaction.reply({
+                        content: '❌ Please specify a user to unverify.',
+                        flags: ['Ephemeral']
+                    });
+                }
+
+                await interaction.deferReply({ flags: ['Ephemeral'] });
+
+                try {
+                    const userRecord = await db.select().from(userRanks).where(eq(userRanks.userId, targetUser.id));
+                    
+                    if (userRecord.length === 0) {
+                        return await interaction.editReply(`❌ User <@${targetUser.id}> is not verified.`);
+                    }
+
+                    await db.delete(userRanks).where(eq(userRanks.userId, targetUser.id));
+                    
+                    // Remove verified role if in guild
+                    if (interaction.guild) {
+                        try {
+                            const member = await interaction.guild.members.fetch(targetUser.id);
+                            if (member) {
+                                await member.roles.remove(BOT_CONFIG.ROLE_VERIFIED_ID);
+                            }
+                        } catch (roleError) {
+                            console.error('[Discord Bot] Error removing role:', roleError);
+                        }
+                    }
+
+                    await interaction.editReply(`✅ Successfully unverified <@${targetUser.id}> and removed their data.`);
+                } catch (error) {
+                    console.error('[Discord Bot] Unverify Error:', error);
+                    await interaction.editReply('❌ Failed to unverify user.');
+                }
+            }
+
             if (interaction.isChatInputCommand() && interaction.commandName === 'stats') {
                 console.log(`📊 [Discord Bot] /stats command from ${interaction.user.tag}`);
                 
+                // Admin only restriction
+                if (interaction.memberPermissions && !interaction.memberPermissions.has('Administrator')) {
+                    return await interaction.reply({
+                        content: '❌ This command is restricted to **Administrators** only.',
+                        flags: ['Ephemeral']
+                    });
+                }
+
+                await interaction.deferReply();
                 try {
-                    const userRecord = await db.select().from(userRanks).where(eq(userRanks.userId, interaction.user.id));
-                    
-                    if (userRecord.length === 0) {
-                        const embed = new EmbedBuilder()
-                            .setTitle('📊 Your Statistics')
-                            .setColor('Yellow')
-                            .setDescription('No verification data found')
-                            .addFields(
-                                { name: 'Status', value: '❌ Not Verified', inline: true },
-                                { name: 'Verifications', value: '0', inline: true },
-                                { name: 'Action', value: 'Use `/verify` to verify your account', inline: false }
-                            )
-                            .setFooter({ text: 'IPEORG MLBB Bot' });
-                        
-                        return await interaction.reply({
-                            embeds: [embed],
-                            flags: ['Ephemeral']
-                        });
+                    const userRecord = await getUserRank(interaction.user.id);
+                    if (!userRecord) {
+                        return interaction.editReply('❌ You are not verified. Use `/verify` first.');
                     }
                     
-                    const profile = userRecord[0];
-                    const characterImagePath = getRandomCharacterImage();
+                    // Generate random stats if not present or older than 7 days
+                    let playerStats;
+                    const sevenDaysAgo = new Date();
+                    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
                     
-                    // Generate the stats card image
-                    const daysVerified = Math.floor((Date.now() - (profile.createdAt ? new Date(profile.createdAt).getTime() : 0)) / (1000 * 60 * 60 * 24));
-                    const statsCardImage = await generateAccountDetailsCard(characterImagePath, {
-                        gameId: profile.mlbbId,
-                        server: profile.serverId,
-                        gameName: profile.currentRank || 'Unranked',
-                        region: new Date(profile.createdAt || 0).toLocaleDateString(),
-                        rank: profile.currentRank || 'Unranked',
-                        level: `${daysVerified} Days`,
-                        status: 'Active'
+                    if (!userRecord.stats || !userRecord.lastStatsUpdate || userRecord.lastStatsUpdate < sevenDaysAgo) {
+                        playerStats = [
+                            { stat: "Push", score: Math.floor(Math.random() * 40) + 60 },
+                            { stat: "Damage", score: Math.floor(Math.random() * 40) + 60 },
+                            { stat: "KDA", score: Math.floor(Math.random() * 40) + 60 },
+                            { stat: "Survival", score: Math.floor(Math.random() * 40) + 60 },
+                            { stat: "Farm", score: Math.floor(Math.random() * 40) + 60 },
+                            { stat: "Team Fight", score: Math.floor(Math.random() * 40) + 60 },
+                        ];
+                        await updateUserRank(
+                            userRecord.userId,
+                            userRecord.guildId,
+                            userRecord.mlbbId,
+                            userRecord.serverId,
+                            userRecord.currentRank || 'Warrior',
+                            userRecord.stars || 0,
+                            userRecord.points || 0,
+                            userRecord.division || undefined,
+                            userRecord.playerName || undefined
+                        );
+                        // Update stats specifically
+                        await db.update(userRanks)
+                            .set({ 
+                                stats: JSON.stringify(playerStats),
+                                lastStatsUpdate: new Date()
+                            })
+                            .where(eq(userRanks.userId, userRecord.userId));
+                    } else {
+                        playerStats = JSON.parse(userRecord.stats);
+                    }
+                    
+                    const characterImage = `https://raw.githubusercontent.com/forexapex/MOBAVERIFICATION/main/Skin%20PNG/${encodeURIComponent(userRecord.playerName || 'Generic')}.png`;
+                    
+                    const cardImage = await generateAccountDetailsCard(characterImage, {
+                        gameId: userRecord.mlbbId,
+                        server: userRecord.serverId,
+                        gameName: userRecord.playerName || interaction.user.username,
+                        region: userRecord.serverId,
+                        rank: `${userRecord.currentRank} ${userRecord.division || ''}`,
+                        level: 'Active',
+                        status: 'Verified',
+                        performanceScores: playerStats
                     });
-                    
-                    // Send as image attachment
-                    await interaction.reply({
+
+                    await interaction.editReply({
                         files: [{
-                            attachment: statsCardImage,
-                            name: 'verification-stats.png'
-                        }],
-                        flags: ['Ephemeral']
+                            attachment: cardImage,
+                            name: 'stats.png'
+                        }]
                     });
                 } catch (error) {
-                    console.error('[Discord Bot] Error fetching stats:', error instanceof Error ? error.message : String(error));
-                    const errorEmbed = new EmbedBuilder()
-                        .setTitle('❌ Error')
-                        .setColor('Red')
-                        .setDescription('Failed to load your statistics. Please try again.')
-                        .setFooter({ text: 'IPEORG MLBB Bot' });
-                    
-                    await interaction.reply({
-                        embeds: [errorEmbed],
-                        flags: ['Ephemeral']
-                    });
+                    console.error('[Discord Bot] Stats Error:', error);
+                    await interaction.editReply('❌ Failed to fetch statistics.');
                 }
             }
 
@@ -834,10 +851,18 @@ async function startDiscordBot() {
                 
                 if (remainingCooldown) {
                     const minutes = Math.ceil(remainingCooldown / 60000);
+                    const hours = Math.floor(minutes / 60);
+                    const remainingMins = minutes % 60;
+                    
+                    let cooldownMsg = `You can verify again in **${minutes}** minute${minutes > 1 ? 's' : ''}.`;
+                    if (hours > 0) {
+                        cooldownMsg = `You can verify again in **${hours}** hour${hours > 1 ? 's' : ''}${remainingMins > 0 ? ` and **${remainingMins}** minute${remainingMins > 1 ? 's' : ''}` : ''}.`;
+                    }
+
                     const cooldownEmbed = new EmbedBuilder()
                         .setTitle('⏱️ Cooldown Active')
                         .setColor('Red')
-                        .setDescription(`You can verify again in **${minutes}** minute${minutes > 1 ? 's' : ''}.`)
+                        .setDescription(cooldownMsg)
                         .setFooter({ text: 'Verified automatically via IPEORG' });
                     
                     return await interaction.reply({

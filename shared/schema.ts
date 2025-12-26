@@ -114,6 +114,9 @@ export const userRanks = pgTable("user_ranks", {
   stars: integer("stars").default(0),
   points: integer("points").default(0),
   roleId: text("role_id"), // Current role ID assigned
+  // New Stats Fields
+  stats: text("stats"), // JSON string of performance stats
+  lastStatsUpdate: timestamp("last_stats_update"),
   lastChecked: timestamp("last_checked"),
   rankChangedAt: timestamp("rank_changed_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),

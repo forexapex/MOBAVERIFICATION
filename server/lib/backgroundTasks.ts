@@ -13,15 +13,15 @@ export function startRankCheckTask(client: Client): void {
     return;
   }
 
-  console.log("[Background Tasks] Starting rank check background task (every 1 hour)");
+  console.log("[Background Tasks] Starting rank check background task (every 24 hours)");
 
   // Run immediately first
   performRankCheck(client);
 
-  // Then every hour
+  // Then every 24 hours
   rankCheckInterval = setInterval(() => {
     performRankCheck(client);
-  }, 60 * 60 * 1000); // 1 hour
+  }, 24 * 60 * 60 * 1000); // 24 hours
 }
 
 /**
@@ -49,12 +49,12 @@ async function performRankCheck(client: Client): Promise<void> {
         const rankData = await fetchMLBBRank(userRecord.mlbbId, userRecord.serverId);
 
         if (!rankData) {
-          console.warn(`[Background Tasks] Failed to fetch rank for user ${userRecord.userId}`);
+          // Normal case: no public API for rank, so we don't warn
           continue;
         }
 
         const { rank: newRank, stars, points } = parseRank({ tier: rankData.tier, stars: rankData.stars, points: rankData.points });
-        const oldRank = userRecord.currentRank;
+        const oldRank = userRecord.currentRank || "Warrior";
 
         // Update database
         await updateUserRank(
@@ -69,7 +69,11 @@ async function performRankCheck(client: Client): Promise<void> {
 
         // If rank changed, update Discord role
         if (oldRank !== newRank) {
-          console.log(`[Background Tasks] Rank changed for ${userRecord.userId}: ${oldRank} -> ${newRank}`);
+          const oldRankIndex = Object.keys(ROLE_MAP).indexOf(oldRank);
+          const newRankIndex = Object.keys(ROLE_MAP).indexOf(newRank);
+          const isDemotion = newRankIndex < oldRankIndex;
+
+          console.log(`[Background Tasks] Rank changed for ${userRecord.userId}: ${oldRank} -> ${newRank} (${isDemotion ? 'Demotion' : 'Promotion'})`);
 
           const guild = await client.guilds.fetch(userRecord.guildId);
           const member = await guild.members.fetch(userRecord.userId);
@@ -93,11 +97,13 @@ async function performRankCheck(client: Client): Promise<void> {
               }
             }
 
-            // Try to notify user
+            // Notify user
             try {
-              await member.send(
-                `🎮 **Rank Update**\n\n**Account:** ${userRecord.mlbbId} (${userRecord.serverId})\n**Rank Changed:** ${oldRank} → ${newRank}\n**Region:** (${userRecord.serverId})\n\nYour Discord role has been automatically updated. Great job on the climb! 🏆`
-              );
+              const message = isDemotion 
+                ? `📉 **Rank Demotion Notification**\n\nYour rank has dropped from **${oldRank}** to **${newRank}**. Your Discord roles have been updated accordingly. Keep practicing to climb back up! ⚔️`
+                : `🎮 **Rank Update**\n\n**Account:** ${userRecord.mlbbId} (${userRecord.serverId})\n**Rank Changed:** ${oldRank} → ${newRank}\n**Region:** (${userRecord.serverId})\n\nYour Discord role has been automatically updated. Great job on the climb! 🏆`;
+              
+              await member.send(message);
             } catch (e) {
               console.log(`[Background Tasks] Could not DM user ${userRecord.userId}`);
             }
